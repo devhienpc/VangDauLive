@@ -1,0 +1,27 @@
+name = "vangdau-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vangdau-db"
+database_id = "8b08074a-b018-4a92-b17a-5f9d41a18da5"
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["0 1 * * *", "0 10 * * *", "30 9 * * 4"]
+
+[vars]
+APP_ENV = "production"
+EIA_API_KEY = ""
+METALS_API_KEY = ""
+ADMIN_KEY = ""
+
+
+# Bí mật (secrets) khi deploy production:
+#   wrangler secret put EIA_API_KEY
+#   wrangler secret put METALS_API_KEY
+# Khi dev local: tạo file apps/api/.dev.vars và điền key:
+#   EIA_API_KEY="your_eia_key"
+#   METALS_API_KEY="your_metals_key"

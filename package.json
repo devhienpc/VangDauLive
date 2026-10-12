@@ -1,0 +1,19 @@
+{
+  "name": "vangdau-live",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo theo dõi giá vàng, dầu, ngoại tệ Việt Nam và thế giới",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "build:web": "pnpm --filter web build",
+    "build:api": "pnpm --filter api build",
+    "deploy:web": "pnpm --filter web deploy",
+    "deploy:api": "pnpm --filter api deploy",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  }
+}

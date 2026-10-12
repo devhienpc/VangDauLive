@@ -1,0 +1,188 @@
+// src/components/dashboard/NewsSection.tsx
+// Bản tin thị trường tài chính, năng lượng, vĩ mô kết nối API /api/news
+
+import { motion } from 'framer-motion';
+import { useRef } from 'react';
+import { useInView } from 'framer-motion';
+import type { NewsRecord } from '../../types';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { SkeletonNews } from './SkeletonCard';
+import { ErrorRetry } from './ErrorRetry';
+
+interface NewsSectionProps {
+  items: NewsRecord[];
+  isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+}
+
+const CATEGORY_STYLES: Record<string, { label: string; color: string }> = {
+  'Năng lượng':       { label: 'Năng lượng',       color: '#2dd4bf' },
+  'Vàng & Kim loại':  { label: 'Vàng & Kim loại',  color: '#F5A623' },
+  'Vĩ mô / Fed':      { label: 'Vĩ mô / Fed',      color: '#f43f5e' },
+  'Ngoại tệ':         { label: 'Ngoại tệ',         color: '#a78bfa' },
+  'oil':              { label: 'Dầu thô',          color: '#2dd4bf' },
+  'gold':             { label: 'Vàng',             color: '#F5A623' },
+  'fuel':             { label: 'Xăng dầu',         color: '#60a5fa' },
+  'forex':            { label: 'Ngoại tệ',         color: '#a78bfa' },
+};
+
+function formatRelativeTime(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+
+    const diffMs = Date.now() - d.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    if (diffMin < 5) return 'Vừa xong';
+    if (diffMin < 60) return `${diffMin} phút trước`;
+    if (diffHour < 24) return `${diffHour} giờ trước`;
+    if (diffDay === 1) return 'Hôm qua';
+    if (diffDay < 30) return `${diffDay} ngày trước`;
+
+    return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+  } catch {
+    return dateStr;
+  }
+}
+
+function NewsCard({ item, index }: { item: NewsRecord; index: number }) {
+  const reduced = useReducedMotion();
+  const ref = useRef<HTMLElement>(null);
+  const inView = useInView(ref, { once: true, margin: '-30px' });
+
+  const style = CATEGORY_STYLES[item.category] ?? { label: item.category, color: '#38bdf8' };
+  const relativeTime = formatRelativeTime(item.published_at);
+
+  return (
+    <motion.article
+      ref={ref}
+      className="news-card"
+      id={`news-${item.id}`}
+      aria-label={item.title}
+      initial={reduced ? false : { opacity: 0, y: 16 }}
+      animate={inView ? { opacity: 1, y: 0 } : {}}
+      transition={{ duration: 0.35, delay: reduced ? 0 : Math.min(index * 0.06, 0.4), ease: [0.22, 1, 0.36, 1] }}
+      whileHover={reduced ? {} : { y: -2, borderColor: 'rgba(255,255,255,0.2)' }}
+    >
+      <div className="news-meta">
+        <span
+          className="news-category-badge"
+          style={{
+            background: `${style.color}22`,
+            color: style.color,
+            border: `1px solid ${style.color}44`,
+          }}
+        >
+          {style.label}
+        </span>
+        <time className="news-time" dateTime={item.published_at}>
+          {relativeTime}
+        </time>
+      </div>
+
+      <h3 className="news-title">
+        {item.url ? (
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="news-link"
+            title={`Mở bài gốc trên ${item.source}`}
+          >
+            {item.title}
+            <span className="news-external-icon" aria-hidden="true"> ↗</span>
+          </a>
+        ) : (
+          item.title
+        )}
+      </h3>
+
+      <p className="news-summary">{item.summary}</p>
+
+      <div className="news-footer">
+        <span className="news-source" title={`Nguồn tin: ${item.source}`}>
+          <span className="source-dot" aria-hidden="true" />
+          {item.source}
+        </span>
+        {item.url && (
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="news-read-more"
+            aria-label={`Mở bài gốc trên ${item.source}`}
+          >
+            Đọc bài gốc ↗
+          </a>
+        )}
+      </div>
+    </motion.article>
+  );
+}
+
+export function NewsSection({
+  items,
+  isLoading,
+  error,
+  onRetry,
+}: NewsSectionProps) {
+  const reduced = useReducedMotion();
+  const ref = useRef<HTMLElement>(null);
+  const inView = useInView(ref, { once: true, margin: '-30px' });
+
+  if (isLoading) {
+    return <SkeletonNews />;
+  }
+
+  if (error && onRetry) {
+    return (
+      <section className="dash-card" style={{ padding: '24px' }}>
+        <ErrorRetry
+          title="Không thể tải tin tức thị trường"
+          message={error}
+          onRetry={onRetry}
+        />
+      </section>
+    );
+  }
+
+  return (
+    <motion.section
+      ref={ref}
+      className="dash-card"
+      id="news-section"
+      aria-label="Bản tin thị trường"
+      initial={reduced ? false : { opacity: 0, y: 20 }}
+      animate={inView ? { opacity: 1, y: 0 } : {}}
+      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <div className="card-header">
+        <div>
+          <h2 className="card-title">Bản tin thị trường</h2>
+          <p className="card-subtitle">
+            Cập nhật tự động từ VnExpress, CafeF, VietnamBiz, Tuổi Trẻ
+          </p>
+        </div>
+        <span className="badge-live">Live</span>
+      </div>
+
+      <div className="news-list" role="feed" aria-label="Danh sách tin mới nhất">
+        {items.length === 0 ? (
+          <div className="empty-state-wrap" style={{ padding: '32px 16px' }}>
+            <p className="empty-title">Chưa có tin tức mới</p>
+            <p className="empty-desc">Hệ thống đang tiếp tục rà soát các nguồn báo tài chính.</p>
+          </div>
+        ) : (
+          items.map((item, i) => (
+            <NewsCard key={`${item.id}-${i}`} item={item} index={i} />
+          ))
+        )}
+      </div>
+    </motion.section>
+  );
+}
