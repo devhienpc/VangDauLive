@@ -19,20 +19,19 @@ const app = new Hono<{ Bindings: Env }>();
 // CORS: cho phép frontend domain + localhost dev
 app.use('*', cors({
   origin: (origin) => {
-    const allowed = [
-      'https://vangdau.pages.dev',
-      'https://vangdau-live.pages.dev',
-      'http://localhost:5173',
-      'http://localhost:4173',
-    ];
-    // Cho phép tất cả subdomain của pages.dev trong preview deployment
-    if (origin && /^https:\/\/[a-z0-9-]+\.vangdau\.pages\.dev$/.test(origin)) {
+    if (!origin) return '*';
+    if (
+      origin.includes('localhost') ||
+      origin.endsWith('.pages.dev') ||
+      origin.endsWith('.workers.dev') ||
+      origin.includes('vangdau')
+    ) {
       return origin;
     }
-    return allowed.includes(origin) ? origin : allowed[0];
+    return origin;
   },
-  allowMethods: ['GET', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Accept'],
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Accept', 'X-Admin-Key', 'X-Admin-Token', 'Authorization'],
   exposeHeaders: ['X-Cache', 'Cache-Control'],
   maxAge: 86400, // preflight cache 24h
 }));

@@ -8,15 +8,50 @@ import type {
   Category,
 } from '../types';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? '/api';
+/**
+ * Tự động phân giải URL API chính xác
+ */
+function getBaseUrl(): string {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && envUrl.startsWith('http')) {
+    return envUrl.replace(/\/$/, '');
+  }
+
+  // Khi chạy trên domain Cloudflare (workers.dev hoặc pages.dev)
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    // Nếu chạy trên subdomain .workers.dev của user (ví dụ: vangdau-live.hienpcthichlamit.workers.dev)
+    if (host.includes('workers.dev')) {
+      const match = host.match(/vangdau-(?:live|ui|web)\.([a-z0-9_-]+)\.workers\.dev/i);
+      if (match && match[1]) {
+        return `https://vangdau-api.${match[1]}.workers.dev/api`;
+      }
+      return 'https://vangdau-api.hienpcthichlamit.workers.dev/api';
+    }
+    // Nếu chạy trên pages.dev
+    if (host.includes('pages.dev')) {
+      return 'https://vangdau-api.hienpcthichlamit.workers.dev/api';
+    }
+  }
+
+  return envUrl ?? '/api';
+}
 
 async function request<T>(path: string): Promise<ApiResponse<T>> {
-  const url = `${BASE_URL}${path}`;
+  const base = getBaseUrl();
+  const url = `${base}${path}`;
   const res = await fetch(url, {
     headers: {
       Accept: 'application/json',
     },
   });
+
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      `Máy chủ không trả về JSON (nhận về ${contentType || 'HTML'}). Vui lòng kiểm tra endpoint API: ${url}`,
+    );
+  }
 
   if (!res.ok) {
     let errMessage = `HTTP ${res.status}: ${res.statusText}`;
@@ -26,7 +61,7 @@ async function request<T>(path: string): Promise<ApiResponse<T>> {
         errMessage = errData.error;
       }
     } catch {
-      // Bỏ qua lỗi parse JSON error
+      // Bỏ qua lỗi parse
     }
     throw new Error(errMessage);
   }
