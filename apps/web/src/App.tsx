@@ -10,6 +10,7 @@ import { AppFooter } from './components/dashboard/AppFooter';
 import { AnimatedBackground } from './components/dashboard/AnimatedBackground';
 import { SkeletonKpiCard } from './components/dashboard/SkeletonCard';
 import { ErrorRetry } from './components/dashboard/ErrorRetry';
+import { ErrorBoundary } from './components/dashboard/ErrorBoundary';
 
 import { useMarketPrices, useMarketNews, useSystemHealth } from './hooks/useMarketData';
 import type { PriceRecord } from './types';
@@ -166,29 +167,35 @@ function App() {
         {/* ── Chart + News side-by-side ─────────────────── */}
         <div className="chart-news-row">
           <div className="chart-col" id="chart">
-            <PriceLineChart />
+            <ErrorBoundary fallbackTitle="Không thể tải biểu đồ lịch sử">
+              <PriceLineChart />
+            </ErrorBoundary>
           </div>
 
           <div className="news-col" id="news">
-            <NewsSection
-              items={newsRecords}
-              isLoading={newsLoading}
-              error={newsError ? (newsErrObj instanceof Error ? newsErrObj.message : 'Lỗi tải tin tức') : null}
-              onRetry={() => refetchNews()}
-            />
+            <ErrorBoundary fallbackTitle="Không thể tải tin tức thị trường">
+              <NewsSection
+                items={newsRecords}
+                isLoading={newsLoading}
+                error={newsError ? (newsErrObj instanceof Error ? newsErrObj.message : 'Lỗi tải tin tức') : null}
+                onRetry={() => refetchNews()}
+              />
+            </ErrorBoundary>
           </div>
         </div>
 
         {/* ── Bảng niêm yết thời gian thực ───────────────── */}
         <div id="forex">
-          <QuoteTable
-            records={priceRecords}
-            isLoading={pricesLoading}
-            error={pricesError ? (pricesErrObj instanceof Error ? pricesErrObj.message : 'Lỗi tải bảng giá') : null}
-            onRetry={() => refetchPrices()}
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
-          />
+          <ErrorBoundary fallbackTitle="Không thể tải bảng niêm yết">
+            <QuoteTable
+              records={priceRecords}
+              isLoading={pricesLoading}
+              error={pricesError ? (pricesErrObj instanceof Error ? pricesErrObj.message : 'Lỗi tải bảng giá') : null}
+              onRetry={() => refetchPrices()}
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+            />
+          </ErrorBoundary>
         </div>
       </main>
 

@@ -155,12 +155,12 @@ export function PriceLineChart() {
     }));
   }, [historyData, uiRange]);
 
-  const goldVals = chartData.map((d) => d.gold);
-  const oilVals = chartData.map((d) => d.oil);
-  const goldMin = Math.min(...goldVals) * 0.995;
-  const goldMax = Math.max(...goldVals) * 1.005;
-  const oilMin = Math.min(...oilVals) * 0.99;
-  const oilMax = Math.max(...oilVals) * 1.01;
+  const goldVals = chartData.map((d) => d.gold).filter((v) => typeof v === 'number' && !isNaN(v) && v > 0);
+  const oilVals = chartData.map((d) => d.oil).filter((v) => typeof v === 'number' && !isNaN(v) && v > 0);
+  const goldMin = goldVals.length > 0 ? Math.min(...goldVals) * 0.995 : 3500;
+  const goldMax = goldVals.length > 0 ? Math.max(...goldVals) * 1.005 : 4500;
+  const oilMin = oilVals.length > 0 ? Math.min(...oilVals) * 0.99 : 60;
+  const oilMax = oilVals.length > 0 ? Math.max(...oilVals) * 1.01 : 150;
 
   const fmtGold = (v: number) => `$${v.toFixed(0)}`;
   const fmtOil = (v: number) => `$${v.toFixed(1)}`;
@@ -241,7 +241,7 @@ export function PriceLineChart() {
             <p className="empty-title">Chưa có dữ liệu lịch sử trong khoảng thời gian này</p>
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={280} minWidth={100} minHeight={200}>
             <LineChart
               key={`chart-${uiRange}-${animKey}`}
               data={chartData}

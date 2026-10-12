@@ -10,7 +10,7 @@ import { SkeletonTable } from './SkeletonCard';
 import { ErrorRetry } from './ErrorRetry';
 
 interface QuoteTableProps {
-  records: PriceRecord[];
+  records?: PriceRecord[];
   isLoading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -34,30 +34,31 @@ const CATEGORY_LABELS: Record<string, string> = {
   forex:  'Ngoại tệ',
 };
 
-function formatPriceNumber(v: number | null, unit: string): string {
-  if (v == null) return '—';
-  if (unit.includes('USD/oz') || unit.includes('USD/thùng')) {
+function formatPriceNumber(v: number | null, unit?: string | null): string {
+  if (v == null || isNaN(v)) return '—';
+  const u = unit ? String(unit) : '';
+  if (u.includes('USD/oz') || u.includes('USD/thùng')) {
     return v.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   return v.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 }
 
 function exportCsv(records: PriceRecord[]) {
+  if (!records || records.length === 0) return;
   const header = ['Mã', 'Tên', 'Danh mục', 'Giá mua (Bid)', 'Giá bán (Ask)', 'Đơn vị', '% Thay đổi', 'Nguồn', 'Thời điểm lấy'];
   const lines = records.map((r) => [
-    r.symbol,
-    r.name,
-    CATEGORY_LABELS[r.category] ?? r.category,
+    r.symbol ?? '',
+    r.name ?? '',
+    CATEGORY_LABELS[r.category] ?? r.category ?? '',
     r.bid != null ? r.bid : '',
     r.ask != null ? r.ask : '',
-    r.unit,
+    r.unit ?? '',
     (r.change_pct ?? 0).toFixed(2),
-    r.source,
-    r.fetched_at,
+    r.source ?? '',
+    r.fetched_at ?? '',
   ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
 
   const csvContent = [header.join(','), ...lines].join('\r\n');
-  // BOM UTF-8 (\uFEFF) giúp Microsoft Excel hiển thị tiếng Việt chuẩn xác không bị vỡ font
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -87,7 +88,7 @@ function PriceCell({
   reduced,
 }: {
   value: number | null;
-  unit: string;
+  unit?: string | null;
   className: string;
   reduced: boolean;
 }) {
@@ -157,7 +158,7 @@ function AnimatedRow({
 
       {/* Đơn vị */}
       <td className="text-center cell-unit">
-        {record.unit}
+        {record.unit ?? ''}
       </td>
 
       {/* Thay đổi */}
@@ -175,7 +176,7 @@ function AnimatedRow({
 
 // ── Component chính ──────────────────────────────────────────────────────────
 export function QuoteTable({
-  records,
+  records = [],
   isLoading,
   error,
   onRetry,
@@ -188,7 +189,7 @@ export function QuoteTable({
   const ref = useRef<HTMLElement>(null);
   const inView = useInView(ref, { once: true, margin: '-30px' });
 
-  // Đồng bộ với searchTerm từ header nếu có
+  const safeRecords = Array.isArray(records) ? records : [];
   const effectiveQuery = searchTerm || localQuery;
 
   const handleQueryChange = (val: string) => {
@@ -197,29 +198,28 @@ export function QuoteTable({
   };
 
   const filtered = useMemo(() => {
-    let result = records;
+    let result = safeRecords;
 
-    // Lọc theo danh mục
     if (selectedCat !== 'all') {
       if (selectedCat === 'gold') {
-        result = result.filter((r) => r.category === 'gold' || r.category === 'silver');
+        result = result.filter((r) => r && (r.category === 'gold' || r.category === 'silver'));
       } else {
-        result = result.filter((r) => r.category === selectedCat);
+        result = result.filter((r) => r && r.category === selectedCat);
       }
     }
 
-    // Lọc theo từ khóa tìm kiếm (hỗ trợ symbol, tên, nguồn)
     const q = effectiveQuery.trim().toLowerCase();
     if (!q) return result;
 
-    return result.filter(
-      (r) =>
-        r.symbol.toLowerCase().includes(q) ||
-        r.name.toLowerCase().includes(q) ||
-        r.source.toLowerCase().includes(q) ||
-        (CATEGORY_LABELS[r.category] ?? '').toLowerCase().includes(q),
-    );
-  }, [records, selectedCat, effectiveQuery]);
+    return result.filter((r) => {
+      if (!r) return false;
+      const sym = String(r.symbol || '').toLowerCase();
+      const nm = String(r.name || '').toLowerCase();
+      const src = String(r.source || '').toLowerCase();
+      const catLabel = String(CATEGORY_LABELS[r.category] || '').toLowerCase();
+      return sym.includes(q) || nm.includes(q) || src.includes(q) || catLabel.includes(q);
+    });
+  }, [safeRecords, selectedCat, effectiveQuery]);
 
   if (isLoading) {
     return <SkeletonTable />;
@@ -255,7 +255,6 @@ export function QuoteTable({
         </div>
 
         <div className="table-controls">
-          {/* Ô tìm kiếm */}
           <div className="tbl-search-wrap">
             <svg className="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
@@ -271,7 +270,6 @@ export function QuoteTable({
             />
           </div>
 
-          {/* Nút Xuất Excel */}
           <button
             id="btn-export-csv"
             type="button"
@@ -343,7 +341,7 @@ export function QuoteTable({
             ) : (
               filtered.map((record, i) => (
                 <AnimatedRow
-                  key={record.symbol}
+                  key={record.symbol || `row-${i}`}
                   record={record}
                   index={i}
                   reduced={reduced}
@@ -357,7 +355,7 @@ export function QuoteTable({
       {filtered.length > 0 && (
         <div className="table-footer-bar">
           <p className="table-footer-note">
-            Hiển thị <strong>{filtered.length}</strong>/{records.length} hàng hóa niêm yết · Nhấp nháy xanh/đỏ khi giá biến động
+            Hiển thị <strong>{filtered.length}</strong>/{safeRecords.length} hàng hóa niêm yết · Nhấp nháy xanh/đỏ khi giá biến động
           </p>
         </div>
       )}
