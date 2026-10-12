@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { AppHeader } from './components/dashboard/AppHeader';
 import { KpiCard } from './components/dashboard/KpiCard';
-import { PriceLineChart } from './components/dashboard/PriceLineChart';
+import { PriceChart } from './components/dashboard/PriceChart';
 import { NewsSection } from './components/dashboard/NewsSection';
 import { QuoteTable } from './components/dashboard/QuoteTable';
 import { AppFooter } from './components/dashboard/AppFooter';
@@ -168,7 +168,7 @@ function App() {
         <div className="chart-news-row">
           <div className="chart-col" id="chart">
             <ErrorBoundary fallbackTitle="Không thể tải biểu đồ lịch sử">
-              <PriceLineChart />
+              <PriceChart />
             </ErrorBoundary>
           </div>
 

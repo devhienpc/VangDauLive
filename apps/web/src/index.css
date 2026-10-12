@@ -1280,3 +1280,328 @@ a { text-decoration: none; }
   border-color: #ef4444;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   TRADINGVIEW LIGHTWEIGHT CHARTS – SÀN GIAO DỊCH
+   ══════════════════════════════════════════════════════════════════════════════ */
+.trade-chart-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--navy-800);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-xl);
+  padding: 16px 20px;
+}
+
+.trade-chart-card--fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 99999 !important;
+  border-radius: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 20px !important;
+  background: #060d1a !important;
+  overflow: hidden !important;
+}
+
+/* Toolbar */
+.trade-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.trade-symbol-selector {
+  flex-shrink: 0;
+}
+
+.symbol-dropdown {
+  background: var(--navy-700);
+  color: var(--text-hi);
+  font-family: inherit;
+  font-size: 0.825rem;
+  font-weight: 600;
+  border: 1px solid var(--line-dim);
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.symbol-dropdown:hover, .symbol-dropdown:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 10px var(--gold-dim);
+}
+.symbol-dropdown optgroup {
+  background: var(--navy-900);
+  color: var(--text-mid);
+  font-weight: 700;
+}
+.symbol-dropdown option {
+  background: var(--navy-800);
+  color: var(--text-hi);
+  font-weight: 500;
+}
+
+.trade-type-group,
+.trade-range-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.trade-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Pill buttons */
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--navy-700);
+  border: 1px solid var(--line-soft);
+  color: var(--text-mid);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.pill-btn:hover {
+  color: var(--text-hi);
+  background: var(--navy-600);
+  border-color: var(--line-dim);
+}
+.pill-btn--active {
+  background: var(--gold-dim) !important;
+  color: var(--gold) !important;
+  border-color: rgba(245, 166, 35, 0.4) !important;
+}
+.icon-only-btn {
+  padding: 5px 8px;
+}
+
+/* Dropdown menu container */
+.dropdown-container {
+  position: relative;
+}
+.trade-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 240px;
+  padding: 10px;
+  background: rgba(11, 22, 40, 0.95);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line-dim);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dropdown-menu-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gold);
+  padding: 2px 6px 6px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 4px;
+}
+.dropdown-item-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.775rem;
+  color: var(--text-mid);
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dropdown-item-check:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-hi);
+}
+.dropdown-item-check input[type="checkbox"] {
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+/* Legend & Crosshair Bar */
+.trade-legend-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 6px;
+  background: rgba(6, 13, 26, 0.4);
+  border-radius: 8px;
+}
+.legend-symbol-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-main-sym {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-hi);
+}
+.legend-unit {
+  font-size: 0.72rem;
+  color: var(--text-lo);
+}
+.legend-pulse-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  animation: pulse-dot 1.5s infinite;
+}
+
+.legend-ohlc-values {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.775rem;
+  flex-wrap: wrap;
+}
+.ohlc-item {
+  display: inline-flex;
+  gap: 4px;
+}
+.ohlc-label {
+  color: var(--text-lo);
+}
+.ohlc-val {
+  font-weight: 600;
+}
+.text-up   { color: #22c55e !important; }
+.text-down { color: #ef4444 !important; }
+
+.ohlc-change {
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.ohlc-change--up   { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.ohlc-change--down { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.ohlc-time {
+  color: var(--text-lo);
+  font-size: 0.7rem;
+}
+
+/* Canvas Container */
+.chart-canvas-container {
+  width: 100%;
+  min-height: 340px;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* RSI Sub-panel */
+.rsi-subpanel-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+.rsi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-family: 'Roboto Mono', monospace;
+  color: var(--text-lo);
+  padding: 0 4px;
+}
+.rsi-title {
+  color: #f43f5e;
+  font-weight: 700;
+}
+.rsi-canvas-container {
+  width: 100%;
+  height: 120px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* Footer & Attribution */
+.trade-chart-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 0.72rem;
+  color: var(--text-lo);
+}
+.trade-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.footer-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--up);
+  display: inline-block;
+}
+.footer-divider {
+  opacity: 0.3;
+}
+.tv-attribution {
+  font-size: 0.68rem;
+  color: var(--slate-500);
+}
+.tv-attribution strong {
+  color: var(--text-mid);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .trade-toolbar {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .trade-chart-card {
+    padding: 12px;
+  }
+  .chart-canvas-container {
+    min-height: 320px;
+  }
+  .legend-ohlc-values {
+    gap: 8px;
+    font-size: 0.7rem;
+  }
+}
+
+

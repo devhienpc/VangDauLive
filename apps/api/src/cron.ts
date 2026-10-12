@@ -20,6 +20,7 @@ import { checkPriceSanity } from './adapters/sanity.js';
 import {
   getLatestSinglePrice,
   upsertPrices,
+  updateTodayCandle,
   logIngest,
 } from './db.js';
 
@@ -78,6 +79,15 @@ export async function processAndStorePriceRecords(
       toInsert.push(record);
     } else {
       skipped++;
+    }
+
+    // 4. Cập nhật nến ngày hiện tại (A.3): open = lần đầu ngày, high = max, low = min, close = mới nhất
+    if (currPrice != null && currPrice > 0) {
+      try {
+        await updateTodayCandle(db, record.symbol, recordDate, currPrice, record.source);
+      } catch (err) {
+        console.warn(`[Cron] Lỗi cập nhật candle cho ${record.symbol}:`, err);
+      }
     }
   }
 

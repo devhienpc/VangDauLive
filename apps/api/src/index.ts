@@ -10,7 +10,9 @@ import { pricesRoute }  from './routes/prices.js';
 import { historyRoute } from './routes/history.js';
 import { newsRoute }    from './routes/news.js';
 import { healthRoute }  from './routes/health.js';
+import { candlesRoute } from './routes/candles.js';
 import { runFetchAll }  from './cron.js';
+import { runFullBackfill } from './adapters/backfill.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -51,6 +53,37 @@ app.route('/api/prices',  pricesRoute);
 app.route('/api/history', historyRoute);
 app.route('/api/news',    newsRoute);
 app.route('/api/health',  healthRoute);
+app.route('/api/candles', candlesRoute);
+
+/**
+ * POST /api/admin/backfill – Backfill 1 năm dữ liệu nến OHLC từ Yahoo Finance & EIA
+ * Bảo vệ bằng secret header: X-Admin-Key hoặc X-Admin-Token hoặc Authorization.
+ */
+app.post('/api/admin/backfill', async (c) => {
+  const secret = c.req.header('X-Admin-Key') || c.req.header('X-Admin-Token') || c.req.header('Authorization');
+  if (c.env.APP_ENV === 'production' && !secret) {
+    return c.json({ success: false, error: 'Không được phép: thiếu header bí mật X-Admin-Key' }, 403);
+  }
+
+  try {
+    const result = await runFullBackfill(c.env.DB, c.env);
+    return c.json({
+      success: true,
+      data: result,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[/api/admin/backfill] Error:', err);
+    return c.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : 'Lỗi khi thực hiện backfill',
+        data: null,
+      },
+      500,
+    );
+  }
+});
 
 /**
  * POST /api/admin/ingest (và alias /api/admin/fetch) – Trigger ingest thủ công (dev / test / admin)

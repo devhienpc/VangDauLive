@@ -42,6 +42,22 @@ export interface HistoryResponseData {
   [symbol: string]: HistoryPoint[];
 }
 
+export interface CandleDataPoint {
+  time: string; // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export interface CandlesResponseData {
+  symbol: string;
+  source: string;
+  hasOHLC: boolean;
+  candles: CandleDataPoint[];
+  updatedAt?: string | null;
+}
+
 export interface HistoryItem {
   symbol: string;
   price: number;

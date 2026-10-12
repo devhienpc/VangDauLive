@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   fetchAllPrices,
   fetchPriceHistory,
+  fetchCandles,
   fetchNews,
   fetchHealth,
 } from '../api/client';
@@ -34,6 +35,23 @@ export function useMarketHistory(
     queryFn: async () => {
       const res = await fetchPriceHistory(symbols, range);
       return res.data ?? {};
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/**
+ * Hook lấy dữ liệu nến OHLC phục vụ biểu đồ TradingView Lightweight Charts
+ */
+export function useCandles(symbol: string = 'XAU_USD', range: string = '1y') {
+  return useQuery({
+    queryKey: ['candles', symbol, range],
+    queryFn: async () => {
+      const res = await fetchCandles(symbol, range);
+      return {
+        ...res.data,
+        updatedAt: res.updatedAt ?? null,
+      };
     },
     staleTime: 10 * 60 * 1000,
   });

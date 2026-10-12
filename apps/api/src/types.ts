@@ -26,6 +26,29 @@ export interface PriceHistoryRecord {
   source: string;
 }
 
+export interface DailyCandle {
+  symbol: string;
+  date: string; // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  source: string;
+}
+
+export interface CandlesResult {
+  symbol: string;
+  source: string;
+  hasOHLC: boolean;
+  candles: Array<{
+    time: string; // YYYY-MM-DD
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  }>;
+}
+
 export interface NewsRecord {
   id?: number;
   title: string;

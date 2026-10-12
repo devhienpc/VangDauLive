@@ -3,6 +3,7 @@ import type {
   ApiResponse,
   PriceRecord,
   HistoryResponseData,
+  CandlesResponseData,
   NewsRecord,
   HealthData,
   Category,
@@ -116,4 +117,18 @@ export async function fetchNews(
  */
 export async function fetchHealth(): Promise<ApiResponse<HealthData>> {
   return request<HealthData>('/health');
+}
+
+/**
+ * Lấy nến OHLC phục vụ biểu đồ TradingView Lightweight Charts
+ * @param symbol Mã hàng hóa (ví dụ: XAU_USD, BRENT, SJC-01)
+ * @param range '1w' | '1m' | '3m' | '6m' | '1y' | 'all'
+ */
+export async function fetchCandles(
+  symbol: string = 'XAU_USD',
+  range: string = '1y',
+): Promise<ApiResponse<CandlesResponseData>> {
+  return request<CandlesResponseData>(
+    `/candles?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`,
+  );
 }

@@ -1,6 +1,6 @@
 // src/db.ts – Các hàm tương tác D1 database (mở rộng đầy đủ)
 
-import type { PriceRecord } from './types.js';
+import type { PriceRecord, DailyCandle } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WRITE
@@ -359,3 +359,103 @@ export async function getPriceHistory(
 ): Promise<Record<string, unknown>[]> {
   return getPriceHistoryMulti(db, [symbol], days);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DAILY CANDLES (OHLC)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Upsert mảng nến ngày vào bảng daily_candles (chia batch tối đa 50)
+ */
+export async function upsertDailyCandles(
+  db: D1Database,
+  candles: DailyCandle[],
+): Promise<number> {
+  if (candles.length === 0) return 0;
+
+  const BATCH_SIZE = 50;
+  let totalInserted = 0;
+
+  for (let i = 0; i < candles.length; i += BATCH_SIZE) {
+    const chunk = candles.slice(i, i + BATCH_SIZE);
+    const stmts = chunk.map((c) =>
+      db
+        .prepare(
+          `INSERT INTO daily_candles (symbol, date, open, high, low, close, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(symbol, date) DO UPDATE SET
+             open = excluded.open,
+             high = excluded.high,
+             low = excluded.low,
+             close = excluded.close,
+             source = excluded.source`,
+        )
+        .bind(c.symbol, c.date, c.open, c.high, c.low, c.close, c.source),
+    );
+    await db.batch(stmts);
+    totalInserted += chunk.length;
+  }
+
+  return totalInserted;
+}
+
+/**
+ * Cập nhật nến ngày hiện tại:
+ * - Nếu chưa có: open = price, high = price, low = price, close = price
+ * - Nếu đã có: open giữ nguyên, high = MAX(high, price), low = MIN(low, price), close = price
+ */
+export async function updateTodayCandle(
+  db: D1Database,
+  symbol: string,
+  date: string,
+  price: number,
+  source: string,
+): Promise<void> {
+  if (price <= 0) return;
+
+  await db
+    .prepare(
+      `INSERT INTO daily_candles (symbol, date, open, high, low, close, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(symbol, date) DO UPDATE SET
+         high = MAX(daily_candles.high, excluded.close),
+         low  = MIN(daily_candles.low, excluded.close),
+         close = excluded.close,
+         source = excluded.source`,
+    )
+    .bind(symbol, date, price, price, price, price, source)
+    .run();
+}
+
+/**
+ * Lấy danh sách nến theo symbol và ngày bắt đầu (sắp xếp tăng dần theo thời gian)
+ */
+export async function getDailyCandles(
+  db: D1Database,
+  symbol: string,
+  startDate?: string,
+): Promise<DailyCandle[]> {
+  let query = `SELECT symbol, date, open, high, low, close, source FROM daily_candles WHERE symbol = ?`;
+  const params: any[] = [symbol];
+
+  if (startDate) {
+    query += ` AND date >= ?`;
+    params.push(startDate);
+  }
+
+  query += ` ORDER BY date ASC`;
+
+  const { results } = await db.prepare(query).bind(...params).all<DailyCandle>();
+  return results || [];
+}
+
+/**
+ * Đếm số lượng nến trong daily_candles
+ */
+export async function countDailyCandles(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM daily_candles`)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
