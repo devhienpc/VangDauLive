@@ -123,6 +123,8 @@ a { text-decoration: none; }
   border: 1px solid var(--line-soft);
   border-radius: var(--r-xl);
   padding: 24px;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
 .card-header {

@@ -1,8 +1,8 @@
 // src/components/dashboard/QuoteTable.tsx
 // Bảng niêm yết: dữ liệu thật từ API, tìm kiếm client, lọc danh mục, xuất Excel CSV BOM UTF-8, flash giá
 
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { motion, useInView } from 'framer-motion';
+import { useState, useMemo, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import type { PriceRecord } from '../../types';
 import { usePrevious } from '../../hooks/usePrevious';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
@@ -186,8 +186,6 @@ export function QuoteTable({
   const [localQuery, setLocalQuery] = useState('');
   const [selectedCat, setSelectedCat] = useState<string>('all');
   const reduced = useReducedMotion();
-  const ref = useRef<HTMLElement>(null);
-  const inView = useInView(ref, { once: true, margin: '-30px' });
 
   const safeRecords = Array.isArray(records) ? records : [];
   const effectiveQuery = searchTerm || localQuery;
@@ -238,14 +236,10 @@ export function QuoteTable({
   }
 
   return (
-    <motion.section
-      ref={ref}
+    <section
       className="dash-card"
       id="quote-table"
       aria-label="Bảng niêm yết giá thời gian thực"
-      initial={reduced ? false : { opacity: 0, y: 24 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
     >
       {/* Header */}
       <div className="card-header">
@@ -359,6 +353,6 @@ export function QuoteTable({
           </p>
         </div>
       )}
-    </motion.section>
+    </section>
   );
 }

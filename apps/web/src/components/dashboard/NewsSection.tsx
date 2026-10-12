@@ -1,11 +1,7 @@
 // src/components/dashboard/NewsSection.tsx
 // Bản tin thị trường tài chính, năng lượng, vĩ mô kết nối API /api/news
 
-import { motion } from 'framer-motion';
-import { useRef } from 'react';
-import { useInView } from 'framer-motion';
 import type { NewsRecord } from '../../types';
-import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { SkeletonNews } from './SkeletonCard';
 import { ErrorRetry } from './ErrorRetry';
 
@@ -50,24 +46,15 @@ function formatRelativeTime(dateStr: string): string {
   }
 }
 
-function NewsCard({ item, index }: { item: NewsRecord; index: number }) {
-  const reduced = useReducedMotion();
-  const ref = useRef<HTMLElement>(null);
-  const inView = useInView(ref, { once: true, margin: '-30px' });
-
+function NewsCard({ item }: { item: NewsRecord; index: number }) {
   const style = CATEGORY_STYLES[item.category] ?? { label: item.category, color: '#38bdf8' };
   const relativeTime = formatRelativeTime(item.published_at);
 
   return (
-    <motion.article
-      ref={ref}
+    <article
       className="news-card"
       id={`news-${item.id}`}
       aria-label={item.title}
-      initial={reduced ? false : { opacity: 0, y: 16 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.35, delay: reduced ? 0 : Math.min(index * 0.06, 0.4), ease: [0.22, 1, 0.36, 1] }}
-      whileHover={reduced ? {} : { y: -2, borderColor: 'rgba(255,255,255,0.2)' }}
     >
       <div className="news-meta">
         <span
@@ -121,7 +108,7 @@ function NewsCard({ item, index }: { item: NewsRecord; index: number }) {
           </a>
         )}
       </div>
-    </motion.article>
+    </article>
   );
 }
 
@@ -131,9 +118,6 @@ export function NewsSection({
   error,
   onRetry,
 }: NewsSectionProps) {
-  const reduced = useReducedMotion();
-  const ref = useRef<HTMLElement>(null);
-  const inView = useInView(ref, { once: true, margin: '-30px' });
 
   if (isLoading) {
     return <SkeletonNews />;
@@ -152,14 +136,10 @@ export function NewsSection({
   }
 
   return (
-    <motion.section
-      ref={ref}
+    <section
       className="dash-card"
       id="news-section"
       aria-label="Bản tin thị trường"
-      initial={reduced ? false : { opacity: 0, y: 20 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="card-header">
         <div>
@@ -183,6 +163,6 @@ export function NewsSection({
           ))
         )}
       </div>
-    </motion.section>
+    </section>
   );
 }

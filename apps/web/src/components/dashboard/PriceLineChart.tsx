@@ -1,8 +1,8 @@
 // src/components/dashboard/PriceLineChart.tsx
 // Biểu đồ đường đôi: biến động Vàng thế giới & Dầu Brent gọi /api/history (30N / 90N / 1N)
 
-import { useState, useId, useRef, useMemo } from 'react';
-import { motion, useInView } from 'framer-motion';
+import { useState, useId, useMemo } from 'react';
+
 import {
   ResponsiveContainer,
   LineChart,
@@ -92,8 +92,6 @@ export function PriceLineChart() {
   const [animKey, setAnimKey] = useState(0);
   const legendId = useId();
   const reduced = useReducedMotion();
-  const ref = useRef<HTMLElement>(null);
-  const inView = useInView(ref, { once: true, margin: '-30px' });
 
   const apiRange = RANGE_MAP[uiRange];
   const { data: historyData, isLoading, isError, error, refetch } = useMarketHistory(
@@ -187,14 +185,10 @@ export function PriceLineChart() {
   }
 
   return (
-    <motion.section
-      ref={ref}
+    <section
       className="dash-card"
       id="chart"
       aria-label="Biểu đồ biến động giá vàng và dầu"
-      initial={reduced ? false : { opacity: 0, y: 24 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
     >
       {/* Header card */}
       <div className="card-header">
@@ -317,6 +311,6 @@ export function PriceLineChart() {
           </ResponsiveContainer>
         )}
       </div>
-    </motion.section>
+    </section>
   );
 }
