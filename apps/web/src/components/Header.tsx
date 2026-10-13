@@ -19,26 +19,13 @@ export function Header({ updatedAt, onRefresh, isLoading }: HeaderProps) {
           animate={{ opacity: 1, x: 0 }}
           className="flex items-center gap-3"
         >
-          <div className="relative">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
-              style={{ background: 'linear-gradient(135deg, #fbbf24, #d97706)' }}
-            >
-              💰
-            </div>
-            <div
-              className="absolute -inset-1 rounded-xl opacity-40 blur-md"
-              style={{ background: 'linear-gradient(135deg, #fbbf24, #d97706)' }}
+          <a href="/" className="flex items-center">
+            <img
+              src="/logo.png"
+              alt="VàngDầu Live"
+              className="h-10 w-auto object-contain"
             />
-          </div>
-          <div>
-            <h1 className="text-gradient-gold font-bold text-xl leading-tight tracking-tight">
-              VàngDầu Live
-            </h1>
-            <p className="text-[var(--text-muted)] text-xs">
-              Theo dõi giá tham khảo
-            </p>
-          </div>
+          </a>
         </motion.div>
 
         {/* Right side */}

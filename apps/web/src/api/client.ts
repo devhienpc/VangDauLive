@@ -12,7 +12,17 @@ import type {
 /**
  * Tự động phân giải URL API chính xác
  */
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
+  // Khi chạy local dev (localhost hoặc 127.0.0.1), luôn dùng proxy '/api' của Vite để kết nối server backend cục bộ
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname === '::1')
+  ) {
+    return '/api';
+  }
+
   const envUrl = import.meta.env.VITE_API_URL;
   if (envUrl && envUrl.startsWith('http')) {
     return envUrl.replace(/\/$/, '');

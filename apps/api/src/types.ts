@@ -16,7 +16,35 @@ export interface PriceRecord {
   source: string;
   fetched_at?: string;
   fetchedAt?: string;
+  effective_at?: string | null;
+  stale?: number | null;
   period?: string | null;
+}
+
+export interface FuelManualRecord {
+  id?: number;
+  symbol: string;
+  price_zone1: number;
+  price_zone2?: number | null;
+  effective_at: string;
+  note?: string | null;
+  created_at?: string;
+}
+
+export interface FuelSuggestionRecord {
+  id?: number;
+  source: string;
+  symbol: string;
+  name?: string | null;
+  price_zone1: number;
+  price_zone2?: number | null;
+  effective_at?: string | null;
+  raw_text?: string | null;
+  status?: 'pending' | 'approved' | 'dismissed';
+  image_url?: string | null;
+  needs_review?: number | null;
+  flags?: string | null;
+  created_at?: string;
 }
 
 export interface PriceHistoryRecord {
@@ -82,5 +110,9 @@ export interface Env {
   METALS_API_KEY: string;
   ADMIN_KEY?: string;
   EXCHANGE_API_KEY?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
+  AI?: any;
+  ANTHROPIC_API_KEY?: string;
 }
 

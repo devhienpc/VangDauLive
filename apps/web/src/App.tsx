@@ -1,6 +1,4 @@
-// src/App.tsx – Dashboard chính VàngDầu Live kết nối TanStack Query & API thật
-
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { AppHeader } from './components/dashboard/AppHeader';
 import { KpiCard } from './components/dashboard/KpiCard';
 import { PriceChart } from './components/dashboard/PriceChart';
@@ -11,6 +9,7 @@ import { AnimatedBackground } from './components/dashboard/AnimatedBackground';
 import { SkeletonKpiCard } from './components/dashboard/SkeletonCard';
 import { ErrorRetry } from './components/dashboard/ErrorRetry';
 import { ErrorBoundary } from './components/dashboard/ErrorBoundary';
+import { AdminFuelPage } from './pages/AdminFuelPage';
 
 import { useMarketPrices, useMarketNews, useSystemHealth } from './hooks/useMarketData';
 import type { PriceRecord } from './types';
@@ -23,7 +22,8 @@ function buildKpiList(records: PriceRecord[]): KpiItem[] {
   const findRecord = (sym: string) => records.find((r) => r.symbol === sym);
 
   const sjc = findRecord('SJC-01') ?? findRecord('SJC-05');
-  const fuel = findRecord('RON92_E5') ?? findRecord('DO0005');
+  // Ưu tiên xăng E10 RON 95 (loại phổ biến nhất tại Việt Nam)
+  const fuel = findRecord('RON95_III') ?? findRecord('RON95_V') ?? findRecord('RON92_E5') ?? findRecord('DO0005');
   const usd = findRecord('USD_VND');
   const brent = findRecord('BRENT') ?? findRecord('WTI');
   const goldWorld = findRecord('XAU_USD');
@@ -46,15 +46,29 @@ function buildKpiList(records: PriceRecord[]): KpiItem[] {
 
   if (fuel) {
     const p = fuel.ask ?? fuel.bid ?? 0;
+    const isStale = fuel.stale === 1 || fuel.stale === true;
+    const displayName = fuel.symbol === 'RON95_III'
+      ? 'Xăng E10 RON 95-III'
+      : fuel.symbol === 'RON95_V'
+      ? 'Xăng E10 RON 95-V'
+      : fuel.name;
+    const displaySymbol = fuel.symbol.startsWith('RON95')
+      ? 'E10 RON 95'
+      : fuel.symbol === 'RON92_E5'
+      ? 'E5 RON 92'
+      : fuel.symbol;
+
     kpis.push({
       id: 'kpi-fuel',
-      label: fuel.name,
-      symbol: fuel.symbol === 'RON92_E5' ? 'E5 RON92' : fuel.symbol,
+      label: displayName,
+      symbol: displaySymbol,
       price: p,
       unit: fuel.unit,
       changePct: fuel.change_pct ?? 0,
       sparkline: [p, p, p * 0.998, p, p, p * 1.001, p],
       colorVar: '#60a5fa',
+      effectiveAt: fuel.effective_at ?? undefined,
+      isStale,
     });
   }
 
@@ -105,6 +119,7 @@ function buildKpiList(records: PriceRecord[]): KpiItem[] {
 
 function App() {
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   // 1. Lấy dữ liệu giá
   const {
@@ -133,17 +148,96 @@ function App() {
   // Build KPIs
   const kpiItems = useMemo(() => buildKpiList(priceRecords), [priceRecords]);
 
+  const [isAdminPage, setIsAdminPage] = useState(() => {
+    return window.location.pathname.startsWith('/admin') || window.location.hash === '#admin';
+  });
+
+  // Phím tắt bí mật để mở trang quản trị: Ctrl + Shift + A
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        window.history.pushState({}, '', '/admin');
+        setIsAdminPage(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const handleLocation = () => {
+      setIsAdminPage(window.location.pathname.startsWith('/admin') || window.location.hash === '#admin');
+    };
+    window.addEventListener('popstate', handleLocation);
+    window.addEventListener('hashchange', handleLocation);
+
+    // Bắt sự kiện click link admin / trang chủ
+    const handleAnchorClick = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a');
+      if (target && target.getAttribute('href') === '/admin') {
+        e.preventDefault();
+        window.history.pushState({}, '', '/admin');
+        setIsAdminPage(true);
+      } else if (target && target.getAttribute('href') === '/') {
+        if (isAdminPage) {
+          e.preventDefault();
+          refetchPrices();
+          window.history.pushState({}, '', '/');
+          setIsAdminPage(false);
+        }
+      }
+    };
+    document.addEventListener('click', handleAnchorClick);
+
+    return () => {
+      window.removeEventListener('popstate', handleLocation);
+      window.removeEventListener('hashchange', handleLocation);
+      document.removeEventListener('click', handleAnchorClick);
+    };
+  }, [isAdminPage, refetchPrices]);
+
+  if (isAdminPage) {
+    return (
+      <div className="page-shell">
+        <AnimatedBackground />
+        <AppHeader
+          updatedAt={updatedAt}
+          records={priceRecords}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          selectedCategory={selectedCategory}
+          onSelectCategory={setSelectedCategory}
+          onRefresh={refetchPrices}
+        />
+        <main className="page-main">
+          <AdminFuelPage
+            onBack={() => {
+              refetchPrices();
+              window.history.pushState({}, '', '/');
+              setIsAdminPage(false);
+            }}
+          />
+        </main>
+        <AppFooter />
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell">
       {/* Nền gradient và hạt chuyển động nhẹ */}
       <AnimatedBackground />
 
-      {/* Header với thời điểm cập nhật từ /api/health và cảnh báo > 36h */}
+      {/* Header với thời điểm cập nhật từ /api/health */}
       <AppHeader
         updatedAt={updatedAt}
         records={priceRecords}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
+        selectedCategory={selectedCategory}
+        onSelectCategory={setSelectedCategory}
+        onRefresh={refetchPrices}
       />
 
       <main className="page-main" id="overview">
@@ -185,7 +279,7 @@ function App() {
         </div>
 
         {/* ── Bảng niêm yết thời gian thực ───────────────── */}
-        <div id="forex">
+        <div id="quote-table-wrap">
           <ErrorBoundary fallbackTitle="Không thể tải bảng niêm yết">
             <QuoteTable
               records={priceRecords}
@@ -194,6 +288,8 @@ function App() {
               onRetry={() => refetchPrices()}
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
+              selectedCategory={selectedCategory}
+              onSelectCategory={setSelectedCategory}
             />
           </ErrorBoundary>
         </div>

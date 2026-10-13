@@ -10,6 +10,8 @@ export interface KpiItem {
   changePct: number;       // % thay đổi so với ngày trước
   sparkline: number[];     // 10 điểm mini sparkline
   colorVar: string;        // CSS var token
+  effectiveAt?: string;
+  isStale?: boolean;
 }
 
 export interface ChartPoint {

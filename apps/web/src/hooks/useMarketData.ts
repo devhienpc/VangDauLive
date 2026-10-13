@@ -19,7 +19,8 @@ export function useMarketPrices(category?: Category | string) {
       const res = await fetchAllPrices(category);
       return res.data ?? [];
     },
-    staleTime: 10 * 60 * 1000, // 10 phút
+    staleTime: 30 * 1000, // 30 giây (phản hồi nhanh khi vừa lưu giá)
+    refetchOnWindowFocus: true,
   });
 }
 

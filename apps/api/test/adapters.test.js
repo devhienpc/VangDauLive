@@ -11,7 +11,12 @@ import assert from 'node:assert/strict';
 
 import { parseVnCurrency, convertChiToLuong, parseSjcHtml } from '../src/adapters/sjc.ts';
 import { parseVcbNumber, parseVcbDateTime, parseVietcombankXml } from '../src/adapters/forex.ts';
-import { parseFuelPrice, parsePetrolimexHtml } from '../src/adapters/fuel.ts';
+import {
+  parseFuelPrice,
+  parsePetrolimexHtml,
+  extractWebGiaFuelEffectiveTime,
+  crossCheckFuelPrices,
+} from '../src/adapters/fuel.ts';
 import { formatPeriodDayMonth } from '../src/adapters/oil.ts';
 import { checkPriceSanity } from '../src/adapters/sanity.ts';
 
@@ -84,8 +89,9 @@ test('Vietcombank: Parse XML trích xuất USD_VND và các ngoại tệ chính'
   assert.equal(usd.source, 'Vietcombank');
 });
 
-test('Petrolimex: Parse bảng xăng dầu webgia.com lấy Vùng 1 cho 4 loại nhiên liệu', () => {
+test('Petrolimex Mẫu 1 (Tên cũ): Parse bảng xăng dầu với tên cũ RON 95-III', () => {
   const mockHtml = `
+    <h1>Giá bán lẻ xăng dầu <small>- Cập nhật lúc 15:00:00 08/10/2026</small></h1>
     <table class="table">
       <tbody>
         <tr><th>Xăng RON 95-III</th><td class="text-right">28.250</td><td class="text-right">28.810</td></tr>
@@ -115,6 +121,122 @@ test('Petrolimex: Parse bảng xăng dầu webgia.com lấy Vùng 1 cho 4 loại
   const do01 = records.find((r) => r.symbol === 'DO001');
   assert.ok(do01);
   assert.equal(do01.ask, 30520);
+});
+
+test('Petrolimex Mẫu 2 (Tên mới E10): Parse bảng xăng dầu với Xăng E10 RON 95-III', () => {
+  const mockHtml = `
+    <p>Bảng giá bán lẻ xăng dầu Petrolimex được cập nhật mới nhất vào lúc <strong>15:00:00 08/10/2026</strong></p>
+    <table class="table">
+      <tbody>
+        <tr><th>Xăng E10 RON 95-III</th><td class="text-right">28.250</td><td class="text-right">28.810</td></tr>
+        <tr><th>Xăng E5 RON 92-II</th><td class="text-right">27.700</td><td class="text-right">28.250</td></tr>
+        <tr><th>DO 0,05S-II</th><td class="text-right">29.120</td><td class="text-right">29.700</td></tr>
+        <tr><th>DO 0,001S-V</th><td class="text-right">30.520</td><td class="text-right">31.130</td></tr>
+      </tbody>
+    </table>
+  `;
+
+  const records = parsePetrolimexHtml(mockHtml);
+  assert.equal(records.length, 4);
+
+  const ron95 = records.find((r) => r.symbol === 'RON95_III');
+  assert.ok(ron95, 'Phải match được RON95_III từ Xăng E10 RON 95-III');
+  assert.equal(ron95.ask, 28250);
+  assert.equal(ron95.effective_at, '2026-10-08 15:00:00');
+});
+
+test('Petrolimex Mẫu 3 (Dòng có giá "-"): Bỏ qua các dòng có giá "-" và chỉ nhận dòng hợp lệ', () => {
+  const mockHtml = `
+    <table class="table">
+      <tbody>
+        <tr><th>Xăng RON 95-V</th><td class="text-right">-</td><td class="text-right">-</td></tr>
+        <tr><th>Xăng RON 95-III</th><td class="text-right">-</td><td class="text-right">-</td></tr>
+        <tr><th>Xăng E5 RON 92-II</th><td class="text-right">26.390</td><td class="text-right">26.910</td></tr>
+        <tr><th>DO 0,05S-II</th><td class="text-right">30.490</td><td class="text-right">31.090</td></tr>
+        <tr><th>DO 0,001S-V</th><td class="text-right">-</td><td class="text-right">-</td></tr>
+      </tbody>
+    </table>
+  `;
+
+  const records = parsePetrolimexHtml(mockHtml);
+  // Chỉ có 2 dòng có giá hợp lệ: RON92_E5 và DO0005
+  assert.equal(records.length, 2);
+
+  const ron95 = records.find((r) => r.symbol === 'RON95_III');
+  assert.equal(ron95, undefined, 'Dòng có giá "-" không được đưa vào records');
+
+  const ron92 = records.find((r) => r.symbol === 'RON92_E5');
+  assert.ok(ron92);
+  assert.equal(ron92.ask, 26390);
+
+  const do05 = records.find((r) => r.symbol === 'DO0005');
+  assert.ok(do05);
+  assert.equal(do05.ask, 30490);
+});
+
+test('Petrolimex: Đọc mốc "Cập nhật lúc" và đánh dấu stale=1 nếu cũ hơn 3 ngày', () => {
+  // Giả lập HTML cũ: Cập nhật lúc 01/10/2026 (> 3 ngày so với hiện tại 13/10/2026)
+  const oldHtml = `
+    <h1>Giá bán lẻ xăng dầu <small>- Cập nhật lúc 14:02:05 01/10/2026</small></h1>
+    <table>
+      <tr><th>Xăng E5 RON 92-II</th><td>26.390</td><td>26.910</td></tr>
+    </table>
+  `;
+  const timeInfoOld = extractWebGiaFuelEffectiveTime(oldHtml);
+  assert.equal(timeInfoOld.effectiveAt, '2026-10-01 14:02:05');
+  assert.equal(timeInfoOld.isStale, true);
+  assert.equal(timeInfoOld.warning, 'warning: nguồn có thể đã cũ');
+
+  const oldRecords = parsePetrolimexHtml(oldHtml);
+  assert.equal(oldRecords[0].stale, 1);
+  assert.equal(oldRecords[0].effective_at, '2026-10-01 14:02:05');
+
+  // Giả lập HTML mới: Cập nhật lúc hôm nay hoặc 1 ngày trước
+  const today = new Date();
+  const d = String(today.getDate()).padStart(2, '0');
+  const m = String(today.getMonth() + 1).padStart(2, '0');
+  const y = today.getFullYear();
+  const freshHtml = `
+    <h1>Giá bán lẻ xăng dầu <small>- Cập nhật lúc 08:00:00 ${d}/${m}/${y}</small></h1>
+    <table>
+      <tr><th>Xăng E5 RON 92-II</th><td>27.700</td><td>28.250</td></tr>
+    </table>
+  `;
+  const timeInfoFresh = extractWebGiaFuelEffectiveTime(freshHtml);
+  assert.equal(timeInfoFresh.isStale, false);
+  assert.equal(timeInfoFresh.warning, undefined);
+
+  const freshRecords = parsePetrolimexHtml(freshHtml);
+  assert.equal(freshRecords[0].stale, 0);
+});
+
+test('Petrolimex: Đối chiếu chéo 2 nguồn, phát hiện lệch > 1%', () => {
+  const recordA = {
+    symbol: 'RON92_E5',
+    name: 'Xăng E5',
+    category: 'fuel',
+    ask: 27700,
+    unit: 'VND/lít',
+    source: 'PVOIL',
+  };
+  const recordB = {
+    symbol: 'RON92_E5',
+    name: 'Xăng E5',
+    category: 'fuel',
+    ask: 26390, // Lệch ~4.7%
+    unit: 'VND/lít',
+    source: 'WebGia',
+  };
+
+  const check = crossCheckFuelPrices(recordA, recordB);
+  assert.equal(check.match, false);
+  assert.ok(check.diffPct > 0.01);
+  assert.ok(check.warning?.includes('không tự ghi đè'));
+
+  // Trường hợp lệch nhỏ dưới 1%
+  const recordC = { ...recordB, ask: 27600 }; // Lệch ~0.36%
+  const checkClose = crossCheckFuelPrices(recordA, recordC);
+  assert.equal(checkClose.match, true);
 });
 
 test('EIA: Định dạng period YYYY-MM-DD sang dd/MM', () => {

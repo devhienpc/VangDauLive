@@ -92,6 +92,20 @@ function AnimatedSparkline({
   );
 }
 
+function formatEffectiveAt(val?: string | null): string | null {
+  if (!val) return null;
+  const cleaned = val.replace('T', ' ');
+  const m = cleaned.match(/(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}))?/);
+  if (m) {
+    const [, _y, mm, dd, hh, min] = m;
+    if (hh !== undefined && min !== undefined) {
+      return `${dd}/${mm} ${hh}:${min}`;
+    }
+    return `${dd}/${mm}`;
+  }
+  return val;
+}
+
 // ── KpiCard ─────────────────────────────────────────────────────────────────
 export function KpiCard({ item, index = 0 }: KpiCardProps) {
   const reduced  = useReducedMotion();
@@ -140,7 +154,30 @@ export function KpiCard({ item, index = 0 }: KpiCardProps) {
     >
       {/* Top row */}
       <div className="kpi-top">
-        <span className="kpi-label">{item.label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span className="kpi-label">{item.label}</span>
+          {(() => {
+            const isOlder10Days =
+              item.effectiveAt &&
+              !isNaN(new Date(item.effectiveAt.replace(' ', 'T')).getTime()) &&
+              Date.now() - new Date(item.effectiveAt.replace(' ', 'T')).getTime() > 10 * 86400 * 1000;
+            if (isOlder10Days) {
+              return (
+                <span className="stale-badge stale-badge--warning" title="Đã quá 10 ngày chưa có bản ghi giá mới">
+                  Nhắc cập nhật (&gt;10 ngày)
+                </span>
+              );
+            }
+            if (item.isStale) {
+              return (
+                <span className="stale-badge" title="Dữ liệu từ nguồn có thể chưa cập nhật kỳ mới">
+                  Chưa cập nhật
+                </span>
+              );
+            }
+            return null;
+          })()}
+        </div>
         <span
           className={`kpi-change ${changeClass}`}
           aria-label={`Thay đổi ${changeSign}${item.changePct}%`}
@@ -165,7 +202,12 @@ export function KpiCard({ item, index = 0 }: KpiCardProps) {
           <p className="kpi-price" style={{ color: item.colorVar }}>
             {formattedPrice}
           </p>
-          <p className="kpi-unit">{item.unit}</p>
+          <p className="kpi-unit">
+            {item.unit}
+            {item.effectiveAt && (
+              <span className="kpi-effective-note"> · Giá từ {formatEffectiveAt(item.effectiveAt)}</span>
+            )}
+          </p>
         </div>
         <AnimatedSparkline
           data={item.sparkline}

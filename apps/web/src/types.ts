@@ -13,7 +13,11 @@ export interface PriceRecord {
   change_pct: number;
   source: string;
   fetched_at: string;
+  effective_at?: string | null;
+  stale?: number | boolean | null;
   period?: string | null;
+  price_zone1?: number | null;
+  price_zone2?: number | null;
 }
 
 // Tương thích ngược với các component cũ

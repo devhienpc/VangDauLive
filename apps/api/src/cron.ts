@@ -14,14 +14,17 @@ import { fetchForexPrices } from './adapters/forex.js';
 import { fetchOilPrices } from './adapters/oil.js';
 import { fetchMetalPrices } from './adapters/metals.js';
 import { fetchSjcPrices } from './adapters/sjc.js';
-import { fetchFuelPrices } from './adapters/fuel.js';
+import { fetchFuelPrices, fetchFuelSuggestions } from './adapters/fuel.js';
 import { fetchAndStoreNews } from './adapters/news.js';
 import { checkPriceSanity } from './adapters/sanity.js';
+import { sendTelegramAlert } from './telegram.js';
 import {
   getLatestSinglePrice,
   upsertPrices,
   updateTodayCandle,
   logIngest,
+  getLatestFuelManual,
+  insertFuelSuggestion,
 } from './db.js';
 
 export interface AdapterResult {
@@ -46,6 +49,22 @@ export async function processAndStorePriceRecords(
   let skipped = 0;
 
   for (const record of records) {
+    // 0. Nếu là xăng dầu, kiểm tra xem có giá nhập tay mới hơn không (ưu tiên giá nhập tay)
+    if (record.category === 'fuel') {
+      try {
+        const manualRows = await getLatestFuelManual(db, record.symbol);
+        const manual = manualRows[0];
+        if (manual && (!record.effective_at || manual.effective_at >= record.effective_at)) {
+          const skipMsg = `[Ưu tiên giá thủ công] Bỏ qua ghi đè ${record.symbol} vì giá nhập tay (${manual.effective_at}) mới hơn giá scrape (${record.effective_at ?? 'N/A'}).`;
+          warnings.push(skipMsg);
+          skipped++;
+          continue;
+        }
+      } catch (err) {
+        console.warn(`[Cron] Lỗi kiểm tra fuel_manual cho ${record.symbol}:`, err);
+      }
+    }
+
     const prevRecord = await getLatestSinglePrice(db, record.symbol);
     const prevPrice = prevRecord ? (prevRecord.ask ?? prevRecord.bid) : null;
     const currPrice = record.ask ?? record.bid ?? record.sellPrice ?? record.buyPrice;
@@ -128,8 +147,8 @@ export async function runFetchAll(env: Env): Promise<AdapterResult[]> {
       fn: () => fetchSjcPrices(),
     },
     {
-      name: 'fuel',
-      fn: () => fetchFuelPrices(),
+      name: 'fuel_suggestions',
+      fn: () => fetchFuelSuggestions(),
     },
   ];
 
@@ -142,24 +161,90 @@ export async function runFetchAll(env: Env): Promise<AdapterResult[]> {
     if (!task || !outcome) continue;
 
     if (outcome.status === 'fulfilled') {
-      const { records, sourceUsed } = outcome.value;
+      const val = outcome.value as any;
+
+      // Xử lý riêng cho gợi ý xăng dầu: KHÔNG ghi đè giá hiển thị (Yêu cầu 3 & 4)
+      if (task.name === 'fuel_suggestions') {
+        const suggestions = val.suggestions || [];
+        const fuelWarnings = val.warnings || [];
+        let diffCount = 0;
+        const alertMessages: string[] = [];
+
+        for (const s of suggestions) {
+          // Lưu vào bảng fuel_suggestions
+          await insertFuelSuggestion(env.DB, s);
+
+          // Kiểm tra xem gợi ý có khác giá đang hiển thị không
+          const manualRows = await getLatestFuelManual(env.DB, s.symbol);
+          const currentPrice = manualRows[0]?.price_zone1;
+          if (currentPrice != null && Math.abs(s.price_zone1 - currentPrice) > 1) {
+            diffCount++;
+            alertMessages.push(
+              `• <b>${s.symbol}</b>: Gợi ý <b>${s.price_zone1.toLocaleString('vi-VN')}đ</b> (Hiện tại: ${currentPrice.toLocaleString('vi-VN')}đ) từ <i>${s.source}</i>`,
+            );
+          }
+        }
+
+        if (alertMessages.length > 0) {
+          const alertHeader =
+            `🔔 <b>[VàngDầu Live] Phát hiện gợi ý thay đổi giá xăng dầu:</b>\n` +
+            alertMessages.join('\n') +
+            `\n\n👉 Vui lòng vào trang /admin để xác nhận duyệt hoặc sửa giá.`;
+          await sendTelegramAlert(env, alertHeader);
+        }
+
+        const logMsg = `Thu thập ${suggestions.length} gợi ý xăng dầu, ${diffCount} mã có giá khác hiện tại. Gợi ý KHÔNG ghi đè giá hiển thị.`;
+        await logIngest(env.DB, 'Scraper Fuel Suggestions', diffCount > 0 ? 'warning' : 'ok', logMsg);
+
+        results.push({
+          adapter: 'fuel_suggestions',
+          sourceUsed: 'WebGia / Petrolimex (Thông cáo)',
+          count: suggestions.length,
+          inserted: suggestions.length,
+          skipped: 0,
+          warnings: fuelWarnings,
+        });
+        continue;
+      }
+
+      const records = val.records || [];
+      const sourceUsed = val.sourceUsed || 'Unknown';
+      const isStale = val.isStale;
+      const effectiveAt = val.effectiveAt;
+      const fuelWarning = val.warning;
+
+      // Yêu cầu 3: Nếu nguồn xăng dầu cũ hơn 3 ngày, ghi ingest_log mức warning
+      if (task.name === 'fuel' && isStale) {
+        await logIngest(
+          env.DB,
+          sourceUsed,
+          'warning',
+          fuelWarning || `warning: nguồn có thể đã cũ (Cập nhật lúc ${effectiveAt ?? 'N/A'})`,
+        );
+      }
+
       try {
         const storeResult = await processAndStorePriceRecords(env.DB, records);
+        const allWarnings = [...storeResult.warnings];
+        if (fuelWarning && !allWarnings.includes(fuelWarning)) {
+          allWarnings.push(fuelWarning);
+        }
+
         results.push({
           adapter: task.name,
           sourceUsed,
           count: records.length,
           inserted: storeResult.inserted,
           skipped: storeResult.skipped,
-          warnings: storeResult.warnings,
+          warnings: allWarnings,
         });
 
-        // Ghi log thành công vào ingest_log
+        // Ghi log vào ingest_log
         await logIngest(
           env.DB,
           sourceUsed,
-          storeResult.warnings.length === 0 ? 'ok' : 'warning',
-          `Lấy ${records.length} bản ghi, lưu mới ${storeResult.inserted}, bỏ qua ${storeResult.skipped}. Cảnh báo: ${storeResult.warnings.length}`,
+          allWarnings.length === 0 ? 'ok' : 'warning',
+          `Lấy ${records.length} bản ghi, lưu mới ${storeResult.inserted}, bỏ qua ${storeResult.skipped}. Cảnh báo: ${allWarnings.length}`,
         );
       } catch (storeErr) {
         const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);

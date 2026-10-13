@@ -12,6 +12,9 @@ migrations_dir = "migrations"
 [triggers]
 crons = ["0 1 * * *", "0 10 * * *", "30 9 * * 4"]
 
+[ai]
+binding = "AI"
+
 [vars]
 APP_ENV = "production"
 EIA_API_KEY = ""

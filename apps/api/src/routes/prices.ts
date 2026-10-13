@@ -18,18 +18,21 @@ const prices = new Hono<{ Bindings: Env }>();
  */
 prices.get('/', async (c) => {
   const url = c.req.url;
+  const noCache = c.req.query('fresh') === '1' || Boolean(c.req.header('Cache-Control')?.includes('no-cache'));
 
   // ── 1. Cache lookup ──────────────────────────────────────────────────────
-  const cached = await getFromCache(url);
-  if (cached) {
-    return new Response(cached.body, {
-      status: cached.status,
-      headers: {
-        ...Object.fromEntries(cached.headers),
-        'X-Cache': 'HIT',
-        ...CACHE_HEADERS,
-      },
-    });
+  if (!noCache) {
+    const cached = await getFromCache(url);
+    if (cached) {
+      return new Response(cached.body, {
+        status: cached.status,
+        headers: {
+          ...Object.fromEntries(cached.headers),
+          'X-Cache': 'HIT',
+          ...CACHE_HEADERS,
+        },
+      });
+    }
   }
 
   // ── 2. Validate query params ─────────────────────────────────────────────
