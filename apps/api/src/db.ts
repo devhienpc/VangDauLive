@@ -1,4 +1,4 @@
-import type { PriceRecord, DailyCandle, FuelManualRecord, FuelSuggestionRecord } from './types.js';
+import type { PriceRecord, DailyCandle, FuelManualRecord, FuelSuggestionRecord, FuelHistoryItem, FuelPeriodHistory, FuelAdjustmentRecord } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WRITE
@@ -173,6 +173,115 @@ export async function getLatestFuelManual(
   return results || [];
 }
 
+/** Lấy lịch sử tất cả các kỳ điều hành xăng dầu được nhóm theo effective_at (kèm chênh lệch +/- VNĐ so với kỳ trước) */
+export async function getFuelPeriodsHistory(
+  db: D1Database,
+  limit: number = 10,
+): Promise<FuelPeriodHistory[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, symbol, price_zone1, price_zone2, effective_at, note
+       FROM fuel_manual
+       ORDER BY effective_at DESC, id DESC`,
+    )
+    .all<{
+      id: number;
+      symbol: string;
+      price_zone1: number;
+      price_zone2: number | null;
+      effective_at: string;
+      note: string | null;
+    }>();
+
+  if (!results || results.length === 0) return [];
+
+  // Nhóm theo effective_at
+  const periodsMap = new Map<string, { note: string; itemsMap: Map<string, any> }>();
+
+  for (const row of results) {
+    if (!periodsMap.has(row.effective_at)) {
+      periodsMap.set(row.effective_at, {
+        note: row.note || '',
+        itemsMap: new Map(),
+      });
+    }
+    const period = periodsMap.get(row.effective_at)!;
+    if (!period.itemsMap.has(row.symbol)) {
+      period.itemsMap.set(row.symbol, row);
+    }
+  }
+
+  const sortedDates = Array.from(periodsMap.keys()).slice(0, limit);
+  const periodsList: FuelPeriodHistory[] = [];
+  const STANDARD_SYMBOLS = ['RON95_V', 'RON95_III', 'RON92_E5', 'DO0005', 'DO001'];
+
+  for (let i = 0; i < sortedDates.length; i++) {
+    const eff = sortedDates[i];
+    if (!eff) continue;
+    const curr = periodsMap.get(eff);
+    if (!curr) continue;
+    const nextDate = i + 1 < sortedDates.length ? sortedDates[i + 1] : undefined;
+    const prev = nextDate ? periodsMap.get(nextDate) : null;
+
+    const items: FuelHistoryItem[] = [];
+
+    for (const sym of STANDARD_SYMBOLS) {
+      const curRow = curr.itemsMap.get(sym);
+      if (!curRow) continue;
+
+      const prevRow = prev?.itemsMap.get(sym);
+      let diff_zone1: number | null = null;
+      let diff_zone2: number | null = null;
+      let change_pct: number | null = null;
+
+      if (prevRow) {
+        diff_zone1 = curRow.price_zone1 - prevRow.price_zone1;
+        if (curRow.price_zone2 != null && prevRow.price_zone2 != null) {
+          diff_zone2 = curRow.price_zone2 - prevRow.price_zone2;
+        }
+        if (prevRow.price_zone1 > 0) {
+          change_pct = Math.round(((diff_zone1 / prevRow.price_zone1) * 100) * 100) / 100;
+        }
+      }
+
+      items.push({
+        symbol: sym,
+        name: FUEL_NAMES[sym] ?? sym,
+        price_zone1: curRow.price_zone1,
+        price_zone2: curRow.price_zone2 ?? null,
+        diff_zone1,
+        diff_zone2,
+        change_pct,
+      });
+    }
+
+    // Format nhãn kỳ: ví dụ "15h00 08/10/2026"
+    let period_label = eff;
+    try {
+      const d = new Date(eff.replace(' ', 'T'));
+      if (!isNaN(d.getTime())) {
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        period_label = `${hh}h${min} ${dd}/${mm}/${yyyy}`;
+      }
+    } catch {
+      // ignore
+    }
+
+    periodsList.push({
+      effective_at: eff,
+      period_label,
+      note: curr.note || '',
+      items,
+    });
+  }
+
+  return periodsList;
+}
+
 /** Lấy bản ghi mới nhất của một symbol cụ thể */
 export async function getLatestSinglePrice(
   db: D1Database,
@@ -235,39 +344,46 @@ async function mergeManualFuelPrices(
   items: Record<string, unknown>[],
 ): Promise<Record<string, unknown>[]> {
   try {
-    const manualList = await getLatestFuelManual(db);
-    if (!manualList || manualList.length === 0) return items;
+    const historyPeriods = await getFuelPeriodsHistory(db, 2);
+    if (!historyPeriods || historyPeriods.length === 0) return items;
 
-    const manualMap = new Map(manualList.map((m) => [m.symbol, m]));
+    const latestPeriod = historyPeriods[0];
+    if (!latestPeriod) return items;
+    const prevPeriod = historyPeriods.length > 1 && historyPeriods[1] ? historyPeriods[1] : null;
+
+    const latestMap = new Map(latestPeriod.items.map((m) => [m.symbol, m]));
+    const prevMap = new Map(prevPeriod ? prevPeriod.items.map((m) => [m.symbol, m]) : []);
 
     for (const item of items) {
       const sym = String(item.symbol || '');
-      const manual = manualMap.get(sym);
+      const manual = latestMap.get(sym);
       if (!manual) continue;
 
-      const effectiveTime = new Date(manual.effective_at.replace(' ', 'T')).getTime();
+      const effectiveTime = new Date(latestPeriod.effective_at.replace(' ', 'T')).getTime();
       const isOver10Days = !isNaN(effectiveTime) && (Date.now() - effectiveTime > 10 * 86400 * 1000);
 
       item.price_zone1 = manual.price_zone1;
       item.price_zone2 = manual.price_zone2 ?? null;
       item.ask = manual.price_zone1;
       item.bid = manual.price_zone2 ?? null;
-      item.source = manual.note
-        ? `Petrolimex (thông cáo điều hành giá), cập nhật thủ công (${manual.note})`
+      item.change_pct = manual.change_pct ?? 0;
+      item.diff_amount = manual.diff_zone1 ?? null;
+      item.source = latestPeriod.note
+        ? `Petrolimex (thông cáo điều hành giá), cập nhật thủ công (${latestPeriod.note})`
         : 'Petrolimex (thông cáo điều hành giá), cập nhật thủ công';
-      item.effective_at = manual.effective_at;
+      item.effective_at = latestPeriod.effective_at;
       item.stale = isOver10Days ? 1 : 0;
     }
 
     // Nếu có mã trong fuel_manual mà chưa có trong bảng prices
-    for (const [sym, manual] of manualMap.entries()) {
+    for (const [sym, manual] of latestMap.entries()) {
       const exists = items.some((it) => it.symbol === sym);
       if (!exists) {
-        const effectiveTime = new Date(manual.effective_at.replace(' ', 'T')).getTime();
+        const effectiveTime = new Date(latestPeriod.effective_at.replace(' ', 'T')).getTime();
         const isOver10Days = !isNaN(effectiveTime) && (Date.now() - effectiveTime > 10 * 86400 * 1000);
 
         items.push({
-          id: manual.id ?? 0,
+          id: 0,
           symbol: sym,
           name: FUEL_NAMES[sym] ?? sym,
           category: 'fuel',
@@ -276,12 +392,13 @@ async function mergeManualFuelPrices(
           bid: manual.price_zone2 ?? null,
           ask: manual.price_zone1,
           unit: 'VND/lít',
-          change_pct: 0,
-          source: manual.note
-            ? `Petrolimex (thông cáo điều hành giá), cập nhật thủ công (${manual.note})`
+          change_pct: manual.change_pct ?? 0,
+          diff_amount: manual.diff_zone1 ?? null,
+          source: latestPeriod.note
+            ? `Petrolimex (thông cáo điều hành giá), cập nhật thủ công (${latestPeriod.note})`
             : 'Petrolimex (thông cáo điều hành giá), cập nhật thủ công',
-          fetched_at: manual.created_at ?? manual.effective_at,
-          effective_at: manual.effective_at,
+          fetched_at: latestPeriod.effective_at,
+          effective_at: latestPeriod.effective_at,
           stale: isOver10Days ? 1 : 0,
         });
       }
@@ -666,6 +783,95 @@ export async function getDailyCandles(
 export async function countDailyCandles(db: D1Database): Promise<number> {
   const row = await db
     .prepare(`SELECT COUNT(*) AS n FROM daily_candles`)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FUEL ADJUSTMENTS (Kỳ điều hành giá xăng dầu VN)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Upsert các kỳ điều hành xăng dầu vào bảng fuel_adjustments (batch tối đa 50)
+ */
+export async function upsertFuelAdjustments(
+  db: D1Database,
+  items: FuelAdjustmentRecord[],
+): Promise<number> {
+  if (items.length === 0) return 0;
+
+  const BATCH_SIZE = 50;
+  let totalInserted = 0;
+
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const chunk = items.slice(i, i + BATCH_SIZE);
+    const stmts = chunk.map((item) =>
+      db
+        .prepare(
+          `INSERT INTO fuel_adjustments (effective_at, product, price_zone1, delta, source_url, note)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(effective_at, product) DO UPDATE SET
+             price_zone1 = excluded.price_zone1,
+             delta = excluded.delta,
+             source_url = excluded.source_url,
+             note = excluded.note`,
+        )
+        .bind(
+          item.effective_at,
+          item.product,
+          item.price_zone1,
+          item.delta ?? null,
+          item.source_url ?? null,
+          item.note ?? null,
+        ),
+    );
+    await db.batch(stmts);
+    totalInserted += chunk.length;
+  }
+
+  // Tự động đối chiếu độ chính xác của nhận định xăng dầu
+  try {
+    const { evaluateBatchFuelAdjustments } = await import('./forecast/accuracy.ts');
+    await evaluateBatchFuelAdjustments(db, items);
+  } catch (err: any) {
+    console.warn('[upsertFuelAdjustments] Lỗi tự đối chiếu độ chính xác nhận định:', err?.message || err);
+  }
+
+  return totalInserted;
+}
+
+/**
+ * Lấy danh sách các kỳ điều hành giá xăng dầu
+ */
+export async function getFuelAdjustments(
+  db: D1Database,
+  options?: { product?: string | undefined; limit?: number | undefined },
+): Promise<FuelAdjustmentRecord[]> {
+  let query = `SELECT id, effective_at, product, price_zone1, delta, source_url, note FROM fuel_adjustments`;
+  const params: any[] = [];
+
+  if (options?.product) {
+    query += ` WHERE product = ?`;
+    params.push(options.product);
+  }
+
+  query += ` ORDER BY effective_at DESC, id DESC`;
+
+  if (options?.limit) {
+    query += ` LIMIT ?`;
+    params.push(options.limit);
+  }
+
+  const { results } = await db.prepare(query).bind(...params).all<FuelAdjustmentRecord>();
+  return results || [];
+}
+
+/**
+ * Đếm số lượng bản ghi trong fuel_adjustments
+ */
+export async function countFuelAdjustments(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM fuel_adjustments`)
     .first<{ n: number }>();
   return row?.n ?? 0;
 }

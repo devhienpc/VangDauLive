@@ -7,6 +7,9 @@ import type {
   NewsRecord,
   HealthData,
   Category,
+  FuelPeriodHistory,
+  LatestForecastResponseData,
+  ForecastAccuracyResponseData,
 } from '../types';
 
 /**
@@ -142,3 +145,25 @@ export async function fetchCandles(
     `/candles?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`,
   );
 }
+
+/**
+ * Lấy lịch sử tất cả các kỳ điều hành xăng dầu (Petrolimex)
+ */
+export async function fetchFuelHistory(limit: number = 10): Promise<ApiResponse<FuelPeriodHistory[]>> {
+  return request<FuelPeriodHistory[]>(`/prices/fuel-history?limit=${limit}`);
+}
+
+/**
+ * Lấy nhận định giá xăng dầu kỳ điều hành mới nhất
+ */
+export async function fetchLatestForecast(): Promise<ApiResponse<LatestForecastResponseData>> {
+  return request<LatestForecastResponseData>('/forecast/latest');
+}
+
+/**
+ * Lấy lịch sử và thống kê độ chính xác của các kỳ nhận định
+ */
+export async function fetchForecastAccuracy(): Promise<ApiResponse<ForecastAccuracyResponseData>> {
+  return request<ForecastAccuracyResponseData>('/forecast/accuracy');
+}
+

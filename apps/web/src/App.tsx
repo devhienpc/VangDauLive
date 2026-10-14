@@ -7,17 +7,18 @@ import { QuoteTable } from './components/dashboard/QuoteTable';
 import { AppFooter } from './components/dashboard/AppFooter';
 import { AnimatedBackground } from './components/dashboard/AnimatedBackground';
 import { SkeletonKpiCard } from './components/dashboard/SkeletonCard';
-import { ErrorRetry } from './components/dashboard/ErrorRetry';
 import { ErrorBoundary } from './components/dashboard/ErrorBoundary';
 import { AdminFuelPage } from './pages/AdminFuelPage';
+import { ForecastAccuracyPage } from './pages/ForecastAccuracyPage';
+import { FuelForecastSection } from './components/forecast/FuelForecastSection';
 
 import { useMarketPrices, useMarketNews, useSystemHealth } from './hooks/useMarketData';
 import type { PriceRecord } from './types';
-import type { KpiItem } from './data/mockDashboard';
+import { MOCK_KPIS, type KpiItem } from './data/mockDashboard';
 
 // Hàm trích xuất các KPI chính từ danh sách giá thật
 function buildKpiList(records: PriceRecord[]): KpiItem[] {
-  if (!records || records.length === 0) return [];
+  if (!records || records.length === 0) return MOCK_KPIS;
 
   const findRecord = (sym: string) => records.find((r) => r.symbol === sym);
 
@@ -152,6 +153,14 @@ function App() {
     return window.location.pathname.startsWith('/admin') || window.location.hash === '#admin';
   });
 
+  const [isAccuracyPage, setIsAccuracyPage] = useState(() => {
+    return (
+      window.location.pathname.startsWith('/nhan-dinh/do-chinh-xac') ||
+      window.location.hash === '#nhan-dinh/do-chinh-xac' ||
+      window.location.hash === '#accuracy'
+    );
+  });
+
   // Phím tắt bí mật để mở trang quản trị: Ctrl + Shift + A
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -159,6 +168,7 @@ function App() {
         e.preventDefault();
         window.history.pushState({}, '', '/admin');
         setIsAdminPage(true);
+        setIsAccuracyPage(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -168,23 +178,39 @@ function App() {
   useEffect(() => {
     const handleLocation = () => {
       setIsAdminPage(window.location.pathname.startsWith('/admin') || window.location.hash === '#admin');
+      setIsAccuracyPage(
+        window.location.pathname.startsWith('/nhan-dinh/do-chinh-xac') ||
+        window.location.hash === '#nhan-dinh/do-chinh-xac' ||
+        window.location.hash === '#accuracy'
+      );
     };
     window.addEventListener('popstate', handleLocation);
     window.addEventListener('hashchange', handleLocation);
 
-    // Bắt sự kiện click link admin / trang chủ
+    // Bắt sự kiện click link admin / độ chính xác / trang chủ
     const handleAnchorClick = (e: MouseEvent) => {
       const target = (e.target as HTMLElement).closest('a');
       if (target && target.getAttribute('href') === '/admin') {
         e.preventDefault();
         window.history.pushState({}, '', '/admin');
         setIsAdminPage(true);
+        setIsAccuracyPage(false);
+      } else if (
+        target &&
+        (target.getAttribute('href') === '/nhan-dinh/do-chinh-xac' ||
+          target.getAttribute('href')?.startsWith('/nhan-dinh/do-chinh-xac'))
+      ) {
+        e.preventDefault();
+        window.history.pushState({}, '', '/nhan-dinh/do-chinh-xac');
+        setIsAccuracyPage(true);
+        setIsAdminPage(false);
       } else if (target && target.getAttribute('href') === '/') {
-        if (isAdminPage) {
+        if (isAdminPage || isAccuracyPage) {
           e.preventDefault();
           refetchPrices();
           window.history.pushState({}, '', '/');
           setIsAdminPage(false);
+          setIsAccuracyPage(false);
         }
       }
     };
@@ -195,7 +221,35 @@ function App() {
       window.removeEventListener('hashchange', handleLocation);
       document.removeEventListener('click', handleAnchorClick);
     };
-  }, [isAdminPage, refetchPrices]);
+  }, [isAdminPage, isAccuracyPage, refetchPrices]);
+
+  if (isAccuracyPage) {
+    return (
+      <div className="page-shell">
+        <AnimatedBackground />
+        <AppHeader
+          updatedAt={updatedAt}
+          records={priceRecords}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          selectedCategory={selectedCategory}
+          onSelectCategory={setSelectedCategory}
+          onRefresh={refetchPrices}
+        />
+        <main className="page-main">
+          <ForecastAccuracyPage
+            onBack={() => {
+              refetchPrices();
+              window.history.pushState({}, '', '/');
+              setIsAccuracyPage(false);
+            }}
+          />
+        </main>
+        <AppFooter />
+      </div>
+    );
+  }
+
 
   if (isAdminPage) {
     return (
@@ -245,20 +299,14 @@ function App() {
         <section className="kpi-grid" aria-label="Các chỉ số giá chính">
           {pricesLoading ? (
             Array.from({ length: 5 }).map((_, i) => <SkeletonKpiCard key={i} />)
-          ) : pricesError ? (
-            <div style={{ gridColumn: '1 / -1' }}>
-              <ErrorRetry
-                title="Không thể tải chỉ số thị trường"
-                message={pricesErrObj instanceof Error ? pricesErrObj.message : 'Lỗi kết nối máy chủ'}
-                onRetry={() => refetchPrices()}
-              />
-            </div>
           ) : (
-            kpiItems.map((kpi, i) => <KpiCard key={kpi.id} item={kpi} index={i} />)
+            (kpiItems.length > 0 ? kpiItems : MOCK_KPIS).map((kpi, i) => (
+              <KpiCard key={kpi.id} item={kpi} index={i} />
+            ))
           )}
         </section>
 
-        {/* ── Chart + News side-by-side ─────────────────── */}
+        {/* ── Chart + News side-by-side (Trọng tâm giao diện) ── */}
         <div className="chart-news-row">
           <div className="chart-col" id="chart">
             <ErrorBoundary fallbackTitle="Không thể tải biểu đồ lịch sử">
@@ -293,6 +341,14 @@ function App() {
             />
           </ErrorBoundary>
         </div>
+
+        {/* ── Khối Nhận định giá xăng kỳ điều hành tới (đặt phía dưới) ── */}
+        <FuelForecastSection
+          onNavigateAccuracy={() => {
+            window.history.pushState({}, '', '/nhan-dinh/do-chinh-xac');
+            setIsAccuracyPage(true);
+          }}
+        />
       </main>
 
       {/* Chân trang nguồn dữ liệu */}

@@ -34,28 +34,50 @@ candles.get('/', async (c) => {
   const symbol = (c.req.query('symbol') || 'XAU_USD').trim().toUpperCase();
   const range = (c.req.query('range') || '1y').trim().toLowerCase();
 
-  // 1. Cache lookup
+  // 1. Cache lookup: Local dev hoặc header no-cache thì bỏ qua cache để luôn thấy dữ liệu mới nhất
+  const isLocal = c.req.url.includes('localhost') || c.req.url.includes('127.0.0.1');
+  const isDev = isLocal || c.env.APP_ENV === 'development';
+  const noCache = isDev || c.req.header('Cache-Control')?.includes('no-cache') || c.req.query('fresh') === 'true';
+
   const cacheKey = new URL(c.req.url);
   cacheKey.searchParams.set('symbol', symbol);
   cacheKey.searchParams.set('range', range);
   cacheKey.searchParams.sort();
   const cacheUrl = cacheKey.toString();
 
-  const cached = await getFromCache(cacheUrl);
-  if (cached) {
-    return new Response(cached.body, {
-      status: cached.status,
-      headers: {
-        ...Object.fromEntries(cached.headers),
-        'X-Cache': 'HIT',
-        'Cache-Control': 'public, max-age=1800',
-      },
-    });
+  if (!noCache) {
+    const cached = await getFromCache(cacheUrl);
+    if (cached) {
+      return new Response(cached.body, {
+        status: cached.status,
+        headers: {
+          ...Object.fromEntries(cached.headers),
+          'X-Cache': 'HIT',
+          'Cache-Control': 'public, max-age=1800',
+        },
+      });
+    }
   }
 
   try {
     const startDate = calculateStartDate(range);
-    const rows = await getDailyCandles(c.env.DB, symbol, startDate);
+    let rows = await getDailyCandles(c.env.DB, symbol, startDate);
+
+    // Fallback thông minh cho các bí danh thông dụng nếu chưa tìm thấy
+    if (rows.length === 0) {
+      const aliasMap: Record<string, string> = {
+        'USD/VND': 'USD_VND',
+        'USD_VND': 'USD/VND',
+        'BZ=F': 'BRENT',
+        'BRENT': 'BZ=F',
+        'CL=F': 'WTI',
+        'WTI': 'CL=F',
+      };
+      const alias = aliasMap[symbol];
+      if (alias) {
+        rows = await getDailyCandles(c.env.DB, alias, startDate);
+      }
+    }
 
     // Xác định nguồn dữ liệu đồng nhất của chuỗi (A.5)
     const lastRow = rows.length > 0 ? rows[rows.length - 1] : undefined;
@@ -104,7 +126,9 @@ candles.get('/', async (c) => {
       },
     });
 
-    await putInCache(cacheUrl, response.clone());
+    if (!noCache) {
+      await putInCache(cacheUrl, response.clone());
+    }
     return response;
   } catch (err) {
     console.error('[/api/candles] Error:', err);

@@ -16,8 +16,8 @@
     "db:migrate:remote": "wrangler d1 migrations apply vangdau-db --remote",
     "db:seed:local": "wrangler d1 execute vangdau-db --local --file=seed.sql",
     "db:seed:remote": "wrangler d1 execute vangdau-db --remote --file=seed.sql",
-    "db:setup:local": "npm run db:migrate:local && npm run db:seed:local"
-
+    "db:setup:local": "npm run db:migrate:local && npm run db:seed:local",
+    "db:backfill:local": "curl.exe -s -X POST http://localhost:8787/api/admin/backfill -H \"X-Admin-Key: hiendz123\""
   },
   "dependencies": {
     "hono": "^4.5.3"

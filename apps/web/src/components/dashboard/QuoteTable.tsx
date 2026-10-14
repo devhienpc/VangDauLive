@@ -39,10 +39,21 @@ const CATEGORY_LABELS: Record<string, string> = {
 function formatPriceNumber(v: number | null, unit?: string | null): string {
   if (v == null || isNaN(v)) return '—';
   const u = unit ? String(unit) : '';
-  if (u.includes('USD/oz') || u.includes('USD/thùng')) {
+  if (u.includes('USD') || u.includes('%') || u.includes('/oz') || u.includes('/thùng')) {
     return v.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   return v.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
+}
+
+function getCleanSource(source?: string | null): string {
+  if (!source) return 'Hệ thống';
+  if (source.includes('Petrolimex')) return 'Petrolimex';
+  if (source.includes('Vietcombank')) return 'Vietcombank';
+  if (source.includes('WebGia') || source.includes('SJC')) return 'SJC';
+  if (source.includes('Metals')) return 'Metals.dev';
+  if (source.includes('Yahoo')) return 'Yahoo';
+  if (source.includes('EIA')) return 'EIA';
+  return source.length > 15 ? source.slice(0, 15) + '…' : source;
 }
 
 function exportCsv(records: PriceRecord[]) {
@@ -214,7 +225,7 @@ function AnimatedRow({
           <div>
             <div className="cell-symbol-line">
               <span className="cell-symbol">{record.symbol}</span>
-              <span className="cell-source-tag">{record.source}</span>
+              <span className="cell-source-tag" title={record.source}>{getCleanSource(record.source)}</span>
               {isOlder10Days ? (
                 <span className="stale-badge stale-badge--warning" title="Đã quá 10 ngày chưa có bản ghi giá mới">
                   Nhắc cập nhật (&gt;10 ngày)
@@ -262,7 +273,12 @@ function AnimatedRow({
 
       {/* Thay đổi */}
       <td className={`text-right mono-cell ${changeClass}`}>
-        {changeSign}{(record.change_pct ?? 0).toFixed(2)}%
+        <div>{changeSign}{(record.change_pct ?? 0).toFixed(2)}%</div>
+        {isFuel && record.diff_amount != null && record.diff_amount !== 0 && (
+          <div className="sub-diff-amount">
+            {record.diff_amount > 0 ? `+${record.diff_amount.toLocaleString('vi-VN')} đ` : `${record.diff_amount.toLocaleString('vi-VN')} đ`}
+          </div>
+        )}
       </td>
 
       {/* Trạng thái */}
@@ -448,13 +464,6 @@ export function QuoteTable({
           <span className="hint-icon" aria-hidden="true">ℹ️</span>
           <span>
             <strong>Giá xăng dầu Petrolimex:</strong> <strong>Vùng 1</strong> áp dụng tại các đô thị gần kho cảng (Hà Nội, TP.HCM, Hải Phòng...). <strong>Vùng 2</strong> áp dụng tại các địa bàn xa cảng kho, miền núi, hải đảo (cao hơn tối đa 2%). Mặt hàng bán lẻ không có cơ chế mua vào/bán ra.
-          </span>
-        </div>
-      ) : currentCat === 'all' ? (
-        <div className="category-hint-banner">
-          <span className="hint-icon" aria-hidden="true">ℹ️</span>
-          <span>
-            <strong>Quy cách niêm yết:</strong> Vàng và Ngoại tệ có <strong>Giá mua vào – bán ra</strong> 2 chiều. Xăng dầu áp dụng <strong>Giá Vùng 1 – Vùng 2</strong>. Dầu thô quốc tế giao dịch theo <strong>Giá chuẩn thị trường</strong>.
           </span>
         </div>
       ) : null}

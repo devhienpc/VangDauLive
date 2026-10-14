@@ -18,6 +18,24 @@ export interface PriceRecord {
   period?: string | null;
   price_zone1?: number | null;
   price_zone2?: number | null;
+  diff_amount?: number | null;
+}
+
+export interface FuelHistoryItem {
+  symbol: string;
+  name: string;
+  price_zone1: number;
+  price_zone2?: number | null;
+  diff_zone1?: number | null;
+  diff_zone2?: number | null;
+  change_pct?: number | null;
+}
+
+export interface FuelPeriodHistory {
+  effective_at: string;
+  period_label: string;
+  note: string;
+  items: FuelHistoryItem[];
 }
 
 // Tương thích ngược với các component cũ
@@ -112,3 +130,103 @@ export interface CategoryMeta {
   badgeClass: string;
   description: string;
 }
+
+// ─── Kiểu dữ liệu nhận định giá xăng dầu ──────────────────────────────────
+export type ForecastDirection = 'tăng' | 'giảm' | 'đi ngang';
+export type ForecastMagnitude = 'nhẹ' | 'vừa' | 'mạnh';
+export type ForecastConfidence = 'thấp' | 'vừa' | 'trung bình' | 'cao';
+export type ForecastStatus = 'published' | 'draft' | 'ready' | 'insufficient_data';
+
+export interface NewsFactorItem {
+  news_id: number;
+  title: string;
+  url: string;
+  impact: 'đẩy giá lên' | 'kéo giá xuống' | 'trung tính';
+  certainty: 'thấp' | 'vừa' | 'cao';
+  one_line: string;
+}
+
+export interface NewsFactorGroup {
+  factor: string;
+  supportingCount: number;
+  dominantImpact: 'đẩy giá lên' | 'kéo giá xuống' | 'trung tính';
+  items: NewsFactorItem[];
+}
+
+export interface ForecastCycleInfo {
+  cycleIndex: number;
+  startDate: string;
+  endDate: string;
+  isCurrentCycle: boolean;
+}
+
+export interface ForecastReasons {
+  status?: string;
+  benchmark?: string;
+  changePct?: number;
+  brentChangePct?: number;
+  consistentWithBrent?: boolean;
+  validDaysInCurrentPeriod?: number;
+  thresholdUsed?: number;
+  backtestAccuracy?: number;
+  r2?: number;
+  r2Explanation?: string;
+  reasons?: string[];
+  currentCycle?: ForecastCycleInfo;
+  previousCycle?: ForecastCycleInfo;
+  news_factors?: NewsFactorGroup[];
+}
+
+export interface ForecastItem {
+  id: number;
+  created_at: string;
+  target_period_start: string;
+  product: string;
+  direction: ForecastDirection | null;
+  magnitude: ForecastMagnitude | null;
+  range_low: number | null;
+  range_high: number | null;
+  confidence: ForecastConfidence;
+  status: ForecastStatus;
+  reasons_json?: string;
+  reasons?: ForecastReasons;
+  model_version: string;
+  display_status?: string;
+}
+
+export interface ForecastAccuracySummary {
+  total_evaluations: number;
+  total_hits: number;
+  overall_accuracy_pct: number;
+  recent_evaluations: number;
+  recent_hits: number;
+  recent_accuracy_pct: number;
+  is_auto_shutoff?: boolean;
+  display_status?: 'Hoạt động bình thường' | 'Chưa đủ cơ sở nhận định' | string;
+}
+
+export interface ForecastAccuracyRecord {
+  id: number;
+  forecast_id: number;
+  product: string;
+  target_period_start: string;
+  forecast_direction: ForecastDirection;
+  actual_delta: number;
+  actual_direction: ForecastDirection;
+  hit: number; // 1: đúng, 0: sai
+  evaluated_at: string;
+}
+
+export interface ForecastAccuracyResponseData extends ForecastAccuracySummary {
+  items: ForecastAccuracyRecord[];
+}
+
+export interface LatestForecastResponseData {
+  count: number;
+  is_auto_shutoff: boolean;
+  display_status?: string;
+  items: ForecastItem[];
+  accuracyStats?: ForecastAccuracySummary;
+  updatedAt: string;
+}
+

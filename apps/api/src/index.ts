@@ -22,14 +22,23 @@ import {
   upsertPrices,
   updateTodayCandle,
   logIngest,
+  upsertFuelAdjustments,
+  getFuelAdjustments,
+  countFuelAdjustments,
 } from './db.js';
 import { invalidateCache } from './cache.js';
-import type { FuelManualRecord } from './types.js';
+import type { FuelManualRecord, FuelAdjustmentRecord } from './types.js';
 import {
   processFuelImageOcr,
   fetchPetrolimexPriceImageAndEffectiveAt,
 } from './adapters/ocr-fuel.js';
 import { runFullBackfill } from './adapters/backfill.js';
+import {
+  generateForecast,
+  runBacktest,
+  getForecastAccuracyStats,
+  FORECAST_CONFIG,
+} from './forecast/index.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -72,18 +81,39 @@ app.route('/api/news',    newsRoute);
 app.route('/api/health',  healthRoute);
 app.route('/api/candles', candlesRoute);
 
+function checkAdminAuth(c: any): boolean {
+  const rawSecret =
+    c.req.header('X-Admin-Key') ||
+    c.req.header('X-Admin-Token') ||
+    c.req.header('Authorization') ||
+    c.req.query('secret') ||
+    c.req.query('admin_key');
+  const secret = rawSecret?.replace(/^Bearer\s+/i, '').trim();
+  const expectedKey = c.env.ADMIN_KEY?.trim();
+
+  // Cho phép Cloudflare Access
+  if (c.req.header('CF-Access-Authenticated-User-Email')) return true;
+
+  if (c.env.APP_ENV === 'production') {
+    return expectedKey ? secret === expectedKey : Boolean(secret);
+  }
+  return expectedKey ? secret === expectedKey : true;
+}
+
 /**
- * POST /api/admin/backfill – Backfill 1 năm dữ liệu nến OHLC từ Yahoo Finance & EIA
+ * POST /api/admin/backfill – Backfill 2 năm dữ liệu nến OHLC từ Yahoo Finance
+ * Hỗ trợ tham số query hoặc body ?range=2y (mặc định 2y)
  * Bảo vệ bằng secret header: X-Admin-Key hoặc X-Admin-Token hoặc Authorization.
  */
 app.post('/api/admin/backfill', async (c) => {
-  const secret = c.req.header('X-Admin-Key') || c.req.header('X-Admin-Token') || c.req.header('Authorization');
-  if (c.env.APP_ENV === 'production' && !secret) {
-    return c.json({ success: false, error: 'Không được phép: thiếu header bí mật X-Admin-Key' }, 403);
+  if (!checkAdminAuth(c)) {
+    return c.json({ success: false, error: 'Không được phép: thiếu hoặc sai secret key' }, 401);
   }
 
+  const range = (c.req.query('range') || '2y').trim();
+
   try {
-    const result = await runFullBackfill(c.env.DB, c.env);
+    const result = await runFullBackfill(c.env.DB, c.env, range);
     return c.json({
       success: true,
       data: result,
@@ -107,9 +137,8 @@ app.post('/api/admin/backfill', async (c) => {
  * Bảo vệ bằng secret header: X-Admin-Key hoặc X-Admin-Token.
  */
 const handleAdminIngest = async (c: any) => {
-  const secret = c.req.header('X-Admin-Key') || c.req.header('X-Admin-Token') || c.req.header('Authorization');
-  if (c.env.APP_ENV === 'production' && !secret) {
-    return c.json({ success: false, error: 'Không được phép: thiếu header bí mật X-Admin-Key' }, 403);
+  if (!checkAdminAuth(c)) {
+    return c.json({ success: false, error: 'Không được phép: thiếu hoặc sai secret key' }, 401);
   }
 
   try {
@@ -135,6 +164,213 @@ const handleAdminIngest = async (c: any) => {
 app.post('/api/admin/ingest', handleAdminIngest);
 app.post('/api/admin/fetch', handleAdminIngest);
 
+/**
+ * Hàm phân tích cú pháp CSV lịch sử điều hành xăng dầu (chuẩn RFC 4180)
+ */
+function parseFuelAdjustmentsCSV(rawCsv: string): { records: FuelAdjustmentRecord[]; errors: string[] } {
+  const clean = rawCsv.replace(/^\uFEFF/, '').trim();
+  const lines = clean.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) {
+    return { records: [], errors: ['Tệp CSV rỗng'] };
+  }
+
+  function splitRow(line: string): string[] {
+    const fields: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        fields.push(cur.trim());
+        cur = '';
+      } else {
+        cur += char;
+      }
+    }
+    fields.push(cur.trim());
+    return fields;
+  }
+
+  const headerLine = splitRow(lines[0] ?? '').map((h) => h.toLowerCase().trim());
+  const colIndex = {
+    effective_at: headerLine.indexOf('effective_at'),
+    product: headerLine.indexOf('product'),
+    price_zone1: headerLine.indexOf('price_zone1'),
+    delta: headerLine.indexOf('delta'),
+    source_url: headerLine.indexOf('source_url'),
+    note: headerLine.indexOf('note'),
+  };
+
+  if (colIndex.effective_at === -1 || colIndex.product === -1 || colIndex.price_zone1 === -1) {
+    return {
+      records: [],
+      errors: [
+        'Header CSV thiếu các cột bắt buộc: effective_at, product, price_zone1. Các cột được hỗ trợ: effective_at, product, price_zone1, delta, source_url, note',
+      ],
+    };
+  }
+
+  const records: FuelAdjustmentRecord[] = [];
+  const errors: string[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const rawLine = lines[i];
+    if (!rawLine) continue;
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cols = splitRow(line);
+
+    const rawEffective = cols[colIndex.effective_at]?.trim();
+    const rawProduct = cols[colIndex.product]?.trim();
+    const rawPrice = cols[colIndex.price_zone1]?.trim();
+    const rawDelta = colIndex.delta !== -1 ? cols[colIndex.delta]?.trim() : '';
+    const rawSource = colIndex.source_url !== -1 ? cols[colIndex.source_url]?.trim() : '';
+    const rawNote = colIndex.note !== -1 ? cols[colIndex.note]?.trim() : '';
+
+    if (!rawEffective) {
+      errors.push(`Dòng ${i + 1}: Thiếu effective_at`);
+      continue;
+    }
+    if (!rawProduct) {
+      errors.push(`Dòng ${i + 1}: Thiếu product`);
+      continue;
+    }
+    if (!rawPrice) {
+      errors.push(`Dòng ${i + 1}: Thiếu price_zone1`);
+      continue;
+    }
+
+    const priceNum = parseInt(rawPrice.replace(/[,\.]/g, ''), 10);
+    if (isNaN(priceNum) || priceNum <= 0) {
+      errors.push(`Dòng ${i + 1}: price_zone1 không hợp lệ (${rawPrice})`);
+      continue;
+    }
+
+    let deltaNum: number | null = null;
+    if (rawDelta !== undefined && rawDelta !== '') {
+      const parsedDelta = parseInt(rawDelta.replace(/[,\.\+]/g, ''), 10);
+      if (!isNaN(parsedDelta)) {
+        deltaNum = rawDelta.startsWith('-') ? -Math.abs(parsedDelta) : parsedDelta;
+      }
+    }
+
+    records.push({
+      effective_at: rawEffective,
+      product: rawProduct,
+      price_zone1: priceNum,
+      delta: deltaNum,
+      source_url: rawSource || null,
+      note: rawNote || null,
+    });
+  }
+
+  return { records, errors };
+}
+
+/**
+ * POST /api/admin/fuel-history/import – Nhập lịch sử các kỳ điều hành xăng dầu từ CSV (hoặc JSON)
+ * Bảo vệ bằng secret header (checkAdminAuth).
+ */
+app.post('/api/admin/fuel-history/import', async (c) => {
+  if (!checkAdminAuth(c)) {
+    return c.json({ success: false, error: 'Không được phép: thiếu hoặc sai secret key' }, 401);
+  }
+
+  try {
+    let csvContent = '';
+    const contentType = c.req.header('Content-Type') || '';
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await c.req.formData();
+      const file: any = formData.get('file') || formData.get('csv');
+      if (file && typeof file === 'object' && typeof file.text === 'function') {
+        csvContent = await file.text();
+      } else if (typeof file === 'string') {
+        csvContent = file;
+      }
+    } else if (contentType.includes('application/json')) {
+      const json: any = await c.req.json();
+      if (typeof json.csv === 'string') {
+        csvContent = json.csv;
+      } else if (Array.isArray(json.items)) {
+        const count = await upsertFuelAdjustments(c.env.DB, json.items);
+        return c.json({ success: true, count, totalRows: json.items.length });
+      }
+    } else {
+      csvContent = await c.req.text();
+    }
+
+    if (!csvContent || csvContent.trim().length === 0) {
+      return c.json({ success: false, error: 'Nội dung CSV rỗng hoặc không tìm thấy tệp đính kèm' }, 400);
+    }
+
+    const { records, errors } = parseFuelAdjustmentsCSV(csvContent);
+    if (records.length === 0) {
+      return c.json({ success: false, error: 'Không có dữ liệu hợp lệ để nhập', details: errors }, 400);
+    }
+
+    const count = await upsertFuelAdjustments(c.env.DB, records);
+
+    await logIngest(
+      c.env.DB,
+      'Admin (Fuel Adjustments Import)',
+      'ok',
+      `Đã nhập thành công ${count}/${records.length} kỳ điều hành xăng dầu vào bảng fuel_adjustments`,
+    );
+
+    return c.json({
+      success: true,
+      count,
+      totalRows: records.length,
+      errors: errors.length > 0 ? errors : undefined,
+      sample: records.slice(0, 3),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[/api/admin/fuel-history/import] Error:', err);
+    return c.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : 'Lỗi khi nhập dữ liệu lịch sử điều hành xăng dầu',
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * GET /api/admin/fuel-history – Lấy danh sách các kỳ điều hành đã nhập vào fuel_adjustments
+ */
+app.get('/api/admin/fuel-history', async (c) => {
+  if (!checkAdminAuth(c)) {
+    return c.json({ success: false, error: 'Không được phép: thiếu hoặc sai secret key' }, 401);
+  }
+
+  const product = c.req.query('product');
+  const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!, 10) : 100;
+
+  try {
+    const items = await getFuelAdjustments(c.env.DB, { product, limit });
+    const total = await countFuelAdjustments(c.env.DB);
+    return c.json({
+      success: true,
+      total,
+      count: items.length,
+      items,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
 const FUEL_NAMES_MAP: Record<string, string> = {
   RON95_V: 'Xăng E10 RON 95-V',
   RON95_III: 'Xăng E10 RON 95-III',
@@ -144,25 +380,6 @@ const FUEL_NAMES_MAP: Record<string, string> = {
 };
 
 const STANDARD_FUEL_KEYS = ['RON95_V', 'RON95_III', 'RON92_E5', 'DO0005', 'DO001'] as const;
-
-function checkAdminAuth(c: any): boolean {
-  const rawSecret =
-    c.req.header('X-Admin-Key') ||
-    c.req.header('X-Admin-Token') ||
-    c.req.header('Authorization') ||
-    c.req.query('secret') ||
-    c.req.query('admin_key');
-  const secret = rawSecret?.replace(/^Bearer\s+/i, '').trim();
-  const expectedKey = c.env.ADMIN_KEY?.trim();
-
-  // Cho phép Cloudflare Access
-  if (c.req.header('CF-Access-Authenticated-User-Email')) return true;
-
-  if (c.env.APP_ENV === 'production') {
-    return expectedKey ? secret === expectedKey : Boolean(secret);
-  }
-  return expectedKey ? secret === expectedKey : true;
-}
 
 /**
  * GET /api/admin/fuel – Lấy 5 dòng giá hiện tại và danh sách gợi ý đang chờ duyệt
@@ -267,6 +484,30 @@ app.post('/api/admin/fuel', async (c) => {
       const candleDate = effectiveAt.slice(0, 10);
       await updateTodayCandle(c.env.DB, it.symbol, candleDate, it.price_zone1, 'Thủ công');
 
+      // Tự động ghi vào fuel_adjustments để đối chiếu nhận định
+      let delta = typeof it.delta === 'number' ? it.delta : null;
+      if (delta === null) {
+        const prevAdj = await c.env.DB
+          .prepare(
+            `SELECT price_zone1 FROM fuel_adjustments WHERE product = ? AND effective_at < ? ORDER BY effective_at DESC LIMIT 1`
+          )
+          .bind(it.symbol, effectiveAt)
+          .first<{ price_zone1: number }>();
+        if (prevAdj && typeof prevAdj.price_zone1 === 'number') {
+          delta = it.price_zone1 - prevAdj.price_zone1;
+        }
+      }
+
+      await upsertFuelAdjustments(c.env.DB, [
+        {
+          effective_at: effectiveAt,
+          product: it.symbol,
+          price_zone1: it.price_zone1,
+          delta,
+          note: it.note ?? 'Cập nhật thủ công',
+        },
+      ]);
+
       inserted.push(manualRecord);
     }
 
@@ -358,6 +599,29 @@ app.post('/api/admin/fuel/approve-suggestion', async (c) => {
     ]);
 
     await updateTodayCandle(c.env.DB, suggestion.symbol, effectiveAt.slice(0, 10), suggestion.price_zone1, 'Thủ công');
+
+    // Tự động ghi vào fuel_adjustments để đối chiếu nhận định
+    const prevAdj = await c.env.DB
+      .prepare(
+        `SELECT price_zone1 FROM fuel_adjustments WHERE product = ? AND effective_at < ? ORDER BY effective_at DESC LIMIT 1`
+      )
+      .bind(suggestion.symbol, effectiveAt)
+      .first<{ price_zone1: number }>();
+
+    const delta = prevAdj && typeof prevAdj.price_zone1 === 'number'
+      ? suggestion.price_zone1 - prevAdj.price_zone1
+      : null;
+
+    await upsertFuelAdjustments(c.env.DB, [
+      {
+        effective_at: effectiveAt,
+        product: suggestion.symbol,
+        price_zone1: suggestion.price_zone1,
+        delta,
+        note: `Duyệt từ ${suggestion.source}`,
+      },
+    ]);
+
 
     try {
       const origin = new URL(c.req.url).origin;
@@ -485,9 +749,141 @@ const handleFuelOcrTrigger = async (c: any) => {
 app.post('/api/admin/fuel/trigger-ocr', handleFuelOcrTrigger);
 app.post('/api/admin/fuel/ocr', handleFuelOcrTrigger);
 
+// ─── Forecast Routes (Nhận định giá xăng dầu) ────────────────────────────────
 
+/**
+ * POST /api/admin/forecast/run – Chạy bộ tính nhận định giá xăng dầu và lưu vào bảng forecasts
+ */
+app.post('/api/admin/forecast/run', async (c) => {
+  if (!checkAdminAuth(c)) {
+    return c.json({ success: false, error: 'Không được phép: thiếu hoặc sai secret key' }, 401);
+  }
 
+  try {
+    let options = {};
+    try {
+      options = await c.req.json();
+    } catch {}
 
+    const result = await generateForecast(c.env.DB, { ...options, env: c.env });
+    return c.json({
+      success: true,
+      count: result.forecasts.length,
+      status: result.status,
+      backtestAccuracy: result.backtestAccuracy,
+      reasons: result.reasons,
+      forecasts: result.forecasts,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[/api/admin/forecast/run] Error:', err);
+    return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+/**
+ * GET /api/forecast/accuracy – Thống kê độ chính xác của nhận định xăng dầu
+ * (số nhận định, số đúng, tỷ lệ đúng tổng và theo 10 kỳ gần nhất, trạng thái tự tắt)
+ */
+app.get('/api/forecast/accuracy', async (c) => {
+  try {
+    const stats = await getForecastAccuracyStats(c.env.DB);
+    return c.json({
+      success: true,
+      data: stats,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[/api/forecast/accuracy] Error:', err);
+    return c.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : 'Lỗi lấy thống kê độ chính xác nhận định',
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * GET /api/forecast/latest & GET /api/admin/forecast/latest – Lấy danh sách nhận định mới nhất theo từng sản phẩm
+ */
+const handleGetLatestForecast = async (c: any) => {
+  try {
+    const stats = await getForecastAccuracyStats(c.env.DB);
+    const rows = await c.env.DB.prepare(
+      `SELECT * FROM forecasts WHERE id IN (
+        SELECT MAX(id) FROM forecasts GROUP BY product
+      ) ORDER BY id ASC`
+    ).all();
+
+    const items = (rows.results || []).map((item: any) => {
+      if (stats.is_auto_shutoff) {
+        return {
+          ...item,
+          status: 'insufficient_data',
+          display_status: 'Chưa đủ cơ sở nhận định',
+        };
+      }
+      return item;
+    });
+
+    const responseData = {
+      count: items.length,
+      is_auto_shutoff: stats.is_auto_shutoff,
+      display_status: stats.display_status,
+      items,
+      accuracyStats: {
+        total_evaluations: stats.total_evaluations,
+        total_hits: stats.total_hits,
+        overall_accuracy_pct: stats.overall_accuracy_pct,
+        recent_evaluations: stats.recent_evaluations,
+        recent_hits: stats.recent_hits,
+        recent_accuracy_pct: stats.recent_accuracy_pct,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    return c.json({
+      success: true,
+      data: responseData,
+      ...responseData,
+    });
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+};
+
+app.get('/api/forecast/latest', handleGetLatestForecast);
+app.get('/api/admin/forecast/latest', handleGetLatestForecast);
+
+/**
+ * GET /api/admin/forecast/backtest-report – Lấy báo cáo kết quả backtest chi tiết
+ */
+app.get('/api/admin/forecast/backtest-report', async (c) => {
+  try {
+    const adjStmt = await c.env.DB
+      .prepare('SELECT effective_at, product, price_zone1, delta FROM fuel_adjustments ORDER BY effective_at ASC')
+      .all();
+    const candleStmt = await c.env.DB
+      .prepare("SELECT symbol, date, close FROM daily_candles WHERE symbol IN ('RB=F', 'HO=F', 'BZ=F', 'USD/VND', 'USD_VND') ORDER BY date ASC")
+      .all();
+
+    const report = runBacktest({
+      adjustments: (adjStmt.results || []) as any,
+      candles: (candleStmt.results || []) as any,
+    });
+
+    return c.json({
+      success: true,
+      data: report,
+      config: FORECAST_CONFIG,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
 
 /** Catch-all 404 – trả JSON thống nhất */
 app.notFound((c) =>
@@ -519,14 +915,21 @@ app.onError((err, c) => {
 // ─── Scheduled Handler (Cron Triggers) ────────────────────────────────────────
 const scheduled: ExportedHandlerScheduledHandler<Env> = async (_event, env, ctx) => {
   ctx.waitUntil(
-    runFetchAll(env).then((results) => {
-      const errors = results.filter((r) => r.error);
-      if (errors.length > 0) {
-        console.error('[Cron] Lỗi adapter:', JSON.stringify(errors));
-      } else {
-        console.log('[Cron] Fetch hoàn tất:', JSON.stringify(results));
-      }
-    }),
+    Promise.all([
+      runFetchAll(env).then((results) => {
+        const errors = results.filter((r) => r.error);
+        if (errors.length > 0) {
+          console.error('[Cron] Lỗi adapter:', JSON.stringify(errors));
+        } else {
+          console.log('[Cron] Fetch hoàn tất:', JSON.stringify(results));
+        }
+      }),
+      generateForecast(env.DB, { env })
+        .then((res) => {
+          console.log(`[Cron] Đã chạy nhận định giá xăng hằng ngày: ${res.forecasts.length} sản phẩm, status=${res.status}`);
+        })
+        .catch((e) => console.error('[Cron] Lỗi nhận định giá xăng:', e)),
+    ]),
   );
 };
 

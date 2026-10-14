@@ -55,9 +55,11 @@ export const AVAILABLE_SYMBOLS: SymbolOption[] = [
   // Năng lượng & Dầu khí
   { symbol: 'BRENT',     name: 'Dầu Brent (Futures)',      category: 'fuel',  unit: 'USD/thùng' },
   { symbol: 'WTI',       name: 'Dầu WTI (Futures)',        category: 'fuel',  unit: 'USD/thùng' },
+  { symbol: 'RON95_V',   name: 'Xăng E10 RON 95-V (Vùng 1)', category: 'fuel',  unit: 'VND/lít' },
   { symbol: 'RON95_III', name: 'Xăng RON 95-III (Vùng 1)',category: 'fuel',  unit: 'VND/lít' },
   { symbol: 'RON92_E5',  name: 'Xăng E5 RON 92-II (Vùng 1)',category: 'fuel', unit: 'VND/lít' },
   { symbol: 'DO0005',    name: 'Dầu Diesel 0.05S-II',     category: 'fuel',  unit: 'VND/lít' },
+  { symbol: 'DO001',     name: 'Dầu Diesel 0.001S-V',     category: 'fuel',  unit: 'VND/lít' },
 
   // Ngoại tệ
   { symbol: 'USD_VND',   name: 'Đô la Mỹ (USD/VND)',       category: 'forex', unit: 'VND' },
@@ -150,16 +152,10 @@ export function PriceChart() {
   const hasOHLC = candleResp?.hasOHLC ?? false;
   const currentSource = candleResp?.source ?? 'Hệ thống';
 
-  // Tự động điều chỉnh chartType nếu tài sản chỉ có 1 giá/ngày (hasOHLC = false)
+  // Sử dụng lựa chọn chartType trực tiếp từ người dùng
   const effectiveChartType: ChartType = useMemo(() => {
-    if (!hasOHLC) {
-      if (symbol.includes('RON') || symbol.includes('DO')) {
-        return 'stepline';
-      }
-      return chartType === 'candle' ? 'area' : chartType;
-    }
     return chartType;
-  }, [hasOHLC, chartType, symbol]);
+  }, [chartType]);
 
   const currentOption = useMemo(
     () => AVAILABLE_SYMBOLS.find((s) => s.symbol === symbol) ?? AVAILABLE_SYMBOLS[0],
@@ -228,8 +224,13 @@ export function PriceChart() {
     compareSeriesRef.current = {};
 
     const container = containerRef.current;
-    const width = container.clientWidth || 800;
-    const height = Math.max(340, container.clientHeight || 420);
+    const width = container.clientWidth || 340;
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+    const height = isFullscreen
+      ? Math.max(360, window.innerHeight - 90)
+      : isMobile
+        ? 340
+        : Math.max(380, container.clientHeight || 420);
 
     // ── Biểu đồ chính ──
     const chart = createChart(container, {
@@ -282,7 +283,7 @@ export function PriceChart() {
     // ── Thêm Series chính tùy theo effectiveChartType ──
     let mainSeries: ISeriesApi<SeriesType>;
 
-    if (effectiveChartType === 'candle' && hasOHLC) {
+    if (effectiveChartType === 'candle') {
       mainSeries = chart.addSeries(CandlestickSeries, {
         upColor: '#22c55e',
         downColor: '#ef4444',
@@ -552,34 +553,50 @@ export function PriceChart() {
     }
   }, [isLoading, candles, initChart]);
 
-  // Xử lý Resize tự động theo container
+  // Xử lý Resize tự động theo container dùng ResizeObserver
   useEffect(() => {
-    const handleResize = () => {
-      if (containerRef.current && chartApiRef.current) {
-        const w = containerRef.current.clientWidth;
-        chartApiRef.current.applyOptions({ width: w });
-        if (rsiContainerRef.current && rsiChartApiRef.current) {
-          rsiChartApiRef.current.applyOptions({ width: w });
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w > 0 && chartApiRef.current) {
+          chartApiRef.current.applyOptions({ width: w });
+          if (rsiContainerRef.current && rsiChartApiRef.current) {
+            rsiChartApiRef.current.applyOptions({ width: w });
+          }
         }
       }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    });
+
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [candles, isLoading]);
 
   // ── 4. Fullscreen & Screenshot Actions ───────────────────────────────────
   const toggleFullscreen = () => {
     if (!chartWrapperRef.current) return;
-    if (!document.fullscreenElement) {
-      chartWrapperRef.current.requestFullscreen().then(() => {
-        setIsFullscreen(true);
-      }).catch(() => {
-        setIsFullscreen(true); // Fallback state
-      });
+    if (!isFullscreen) {
+      if (typeof chartWrapperRef.current.requestFullscreen === 'function') {
+        chartWrapperRef.current.requestFullscreen().then(() => {
+          setIsFullscreen(true);
+        }).catch(() => {
+          setIsFullscreen(true); // CSS fallback
+        });
+      } else {
+        setIsFullscreen(true); // Fallback cho iOS Safari
+      }
     } else {
-      document.exitFullscreen().then(() => {
+      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+        document.exitFullscreen().then(() => {
+          setIsFullscreen(false);
+        }).catch(() => {
+          setIsFullscreen(false);
+        });
+      } else {
         setIsFullscreen(false);
-      });
+      }
     }
   };
 
@@ -683,18 +700,16 @@ export function PriceChart() {
           </select>
         </div>
 
-        {/* Nút chuyển Nến / Đường / Vùng */}
+        {/* Nút chuyển Nến / Đường / Vùng / Bậc thang */}
         <div className="trade-type-group" role="group" aria-label="Kiểu biểu đồ">
-          {hasOHLC && (
-            <button
-              type="button"
-              className={`pill-btn ${effectiveChartType === 'candle' ? 'pill-btn--active' : ''}`}
-              onClick={() => setChartType('candle')}
-              title="Biểu đồ Nến Nhật (Candlestick)"
-            >
-              Nến
-            </button>
-          )}
+          <button
+            type="button"
+            className={`pill-btn ${effectiveChartType === 'candle' ? 'pill-btn--active' : ''}`}
+            onClick={() => setChartType('candle')}
+            title="Biểu đồ Nến Nhật (Candlestick)"
+          >
+            Nến
+          </button>
           <button
             type="button"
             className={`pill-btn ${effectiveChartType === 'line' ? 'pill-btn--active' : ''}`}
@@ -711,7 +726,7 @@ export function PriceChart() {
           >
             Vùng
           </button>
-          {!hasOHLC && (symbol.includes('RON') || symbol.includes('DO')) && (
+          {(symbol.includes('RON') || symbol.includes('DO')) && (
             <button
               type="button"
               className={`pill-btn ${effectiveChartType === 'stepline' ? 'pill-btn--active' : ''}`}

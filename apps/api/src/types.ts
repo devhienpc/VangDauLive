@@ -31,6 +31,33 @@ export interface FuelManualRecord {
   created_at?: string;
 }
 
+export interface FuelAdjustmentRecord {
+  id?: number;
+  effective_at: string;
+  product: string;
+  price_zone1: number;
+  delta?: number | null;
+  source_url?: string | null;
+  note?: string | null;
+}
+
+export interface FuelHistoryItem {
+  symbol: string;
+  name: string;
+  price_zone1: number;
+  price_zone2?: number | null;
+  diff_zone1?: number | null;
+  diff_zone2?: number | null;
+  change_pct?: number | null;
+}
+
+export interface FuelPeriodHistory {
+  effective_at: string;
+  period_label: string;
+  note: string;
+  items: FuelHistoryItem[];
+}
+
 export interface FuelSuggestionRecord {
   id?: number;
   source: string;

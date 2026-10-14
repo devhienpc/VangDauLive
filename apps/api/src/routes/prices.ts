@@ -3,11 +3,79 @@
 
 import { Hono } from 'hono';
 import type { Env } from '../types.js';
-import { getLatestPrices, getPricesByCategory, getLastUpdated } from '../db.js';
+import { getLatestPrices, getPricesByCategory, getLastUpdated, getFuelPeriodsHistory } from '../db.js';
 import { getFromCache, putInCache, CACHE_HEADERS } from '../cache.js';
 import { parseCategory } from '../validate.js';
 
 const prices = new Hono<{ Bindings: Env }>();
+
+/**
+ * GET /api/prices/fuel-history
+ * Lấy lịch sử các kỳ điều hành xăng dầu Petrolimex (so sánh đa kỳ)
+ */
+prices.get('/fuel-history', async (c) => {
+  const url = c.req.url;
+  const isLocal = url.includes('localhost') || url.includes('127.0.0.1');
+  const noCache =
+    isLocal ||
+    c.env.APP_ENV === 'development' ||
+    c.req.query('fresh') === '1' ||
+    Boolean(c.req.header('Cache-Control')?.includes('no-cache'));
+
+  if (!noCache) {
+    const cached = await getFromCache(url);
+    if (cached) {
+      return new Response(cached.body, {
+        status: cached.status,
+        headers: {
+          ...Object.fromEntries(cached.headers),
+          'X-Cache': 'HIT',
+          ...CACHE_HEADERS,
+        },
+      });
+    }
+  }
+
+  try {
+    const limit = Number(c.req.query('limit')) || 10;
+    const data = await getFuelPeriodsHistory(c.env.DB, limit);
+
+    const body = JSON.stringify({
+      success: true,
+      data,
+      updatedAt: new Date().toISOString(),
+      meta: {
+        count: data.length,
+      },
+    });
+
+    const response = new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Cache': 'MISS',
+        ...CACHE_HEADERS,
+      },
+    });
+
+    if (!noCache) {
+      await putInCache(url, response.clone());
+    }
+
+    return response;
+  } catch (err) {
+    console.error('[/api/prices/fuel-history] Error:', err);
+    return c.json(
+      {
+        success: false,
+        error: 'Lỗi khi lấy dữ liệu lịch sử các kỳ xăng dầu',
+        data: [],
+        updatedAt: null,
+      },
+      500,
+    );
+  }
+});
 
 /**
  * GET /api/prices
@@ -18,7 +86,8 @@ const prices = new Hono<{ Bindings: Env }>();
  */
 prices.get('/', async (c) => {
   const url = c.req.url;
-  const noCache = c.req.query('fresh') === '1' || Boolean(c.req.header('Cache-Control')?.includes('no-cache'));
+  const isLocal = url.includes('localhost') || url.includes('127.0.0.1');
+  const noCache = isLocal || c.env.APP_ENV === 'development' || c.req.query('fresh') === '1' || Boolean(c.req.header('Cache-Control')?.includes('no-cache'));
 
   // ── 1. Cache lookup ──────────────────────────────────────────────────────
   if (!noCache) {
@@ -47,7 +116,7 @@ prices.get('/', async (c) => {
         data: null,
         updatedAt: null,
       },
-      400,
+      500,
     );
   }
 
@@ -81,7 +150,9 @@ prices.get('/', async (c) => {
     });
 
     // ── 4. Store in cache ──────────────────────────────────────────────────
-    await putInCache(url, response.clone());
+    if (!noCache) {
+      await putInCache(url, response.clone());
+    }
 
     return response;
   } catch (err) {

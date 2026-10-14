@@ -11,7 +11,8 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "outDir": "./dist",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "composite": false
   },
   "include": ["src/**/*.ts"],

@@ -19,17 +19,24 @@ export function AppFooter() {
 
         <div className="footer-divider" aria-hidden="true" />
 
-        <div className="footer-note">
-          <p>
-            <strong>Giá mang tính tham khảo.</strong> Không dùng để ra quyết định đầu tư, mua bán.
-          </p>
-          <p>
-            Nguồn dữ liệu: Vietcombank · EIA · Metals.dev · WebGia (SJC) · Petrolimex (thông cáo điều hành giá), cập nhật thủ công · Yahoo Finance
-          </p>
-          <p className="tv-attribution-footer">
-            Biểu đồ tài chính sử dụng thư viện <strong>Lightweight Charts™</strong> của <strong>TradingView</strong>.
-          </p>
-          <p>© {year} VàngDầu Live · Dữ liệu thị trường thời gian thực · <a href="/admin" className="footer-secret-link" title="Dành cho quản trị viên (Ctrl + Shift + A)">Hệ thống</a></p>
+        <div className="footer-content">
+          <div className="footer-note">
+            <p>
+              <strong>Giá mang tính tham khảo.</strong> Không dùng để ra quyết định đầu tư, mua bán.
+            </p>
+            <p>
+              Nguồn dữ liệu: Vietcombank · EIA · Metals.dev · WebGia (SJC) · Petrolimex (thông cáo điều hành giá), cập nhật thủ công · Yahoo Finance
+            </p>
+            <p className="tv-attribution-footer">
+              Biểu đồ tài chính sử dụng thư viện <strong>Lightweight Charts™</strong> của <strong>TradingView</strong>.
+            </p>
+            <p>© {year} VàngDầu Live · Dữ liệu thị trường thời gian thực · <a href="/admin" className="footer-secret-link" title="Dành cho quản trị viên (Ctrl + Shift + A)">Hệ thống</a></p>
+          </div>
+
+          <div className="footer-author-box">
+            <p><strong>Tác giả:</strong> Trương Văn Hiền</p>
+            <p><strong>Email:</strong> <a href="mailto:hienpcthichlamit@gmail.com" className="footer-author-link">hienpcthichlamit@gmail.com</a></p>
+          </div>
         </div>
       </div>
     </footer>
